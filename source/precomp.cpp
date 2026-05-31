@@ -1,1 +1,0 @@
-#include "../include/core.h" // visual studio need this
