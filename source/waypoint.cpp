@@ -870,11 +870,16 @@ void Waypoint::AddPath(const int16_t addIndex, const int16_t pathIndex, const in
 	}
 
 	// there wasn't any free space. try exchanging it with a long-distance path
+	int16_t existing;
 	float distance, maxDistance = 9999999.0f;
 	int16_t slotID = -1;
 	for (i = 0; i < Const_MaxPathIndex; i++)
 	{
-		distance = (path->origin - m_paths[path->index[i]].origin).GetLengthSquared();
+		existing = path->index[i];
+		if (!IsValidWaypoint(existing))
+			continue;
+
+		distance = (path->origin - m_paths[existing].origin).GetLengthSquared();
 		if (distance > maxDistance)
 		{
 			maxDistance = distance;
@@ -1156,7 +1161,7 @@ void Waypoint::Add(const int flags, const Vector& waypointOrigin, const float an
 
 	if (flags == 9)
 		m_lastJumpWaypoint = index;
-	else if (flags == 10)
+	else if (flags == 10 && IsValidWaypoint(m_lastJumpWaypoint))
 	{
 		AddPath(m_lastJumpWaypoint, index);
 
@@ -1447,6 +1452,34 @@ void Waypoint::DeleteByIndex(const int16_t index)
 
 	EraseFromBucket(m_paths[index].origin, index);
 	m_paths.RemoveAt(index);
+
+	// compact bucket indices after waypoint array compaction.
+	for (i = 0; i < m_buckets.Size();)
+	{
+		int16_t j;
+		for (j = 0; j < m_buckets[i].waypoints.Size();)
+		{
+			int16_t& wayIndex = m_buckets[i].waypoints[j];
+			if (wayIndex == index)
+			{
+				m_buckets[i].waypoints.RemoveAt(j);
+				continue;
+			}
+
+			if (wayIndex > index)
+				wayIndex--;
+
+			j++;
+		}
+
+		if (m_buckets[i].waypoints.IsEmpty())
+		{
+			m_buckets.RemoveAt(i);
+			continue;
+		}
+
+		i++;
+	}
 
 	g_numWaypoints--;
 	if (m_waypointDisplayTime.IsAllocated())
@@ -1934,7 +1967,6 @@ void StopMatrixThreads(void)
 {
 	int i;
 
-	g_isMatrixCalculating = false;
 	for (i = 0; i < g_matrixThreads.Size(); i++)
 	{
 		tthread::thread* t = g_matrixThreads[i];
@@ -1948,20 +1980,27 @@ void StopMatrixThreads(void)
 	}
 
 	g_matrixThreads.Destroy();
+	g_isMatrixCalculating = false;
 
-	// if calculation was in progress but didn't finish, free the incomplete matrix to avoid leaking memory/garbage
 	if (!g_isMatrixReady)
 		g_waypoint->m_distMatrix.Destroy();
 }
 
 void Waypoint::InitPathMatrix(void)
 {
-	// signal any running calculation to stop
 	StopMatrixThreads();
 
 	g_isMatrixReady = false;
-	m_distMatrix.Destroy();
+
 	if (ebot_disable_path_matrix.GetBool())
+	{
+		m_distMatrix.Destroy();
+		return;
+	}
+
+	m_distMatrix.Destroy();
+
+	if (g_numWaypoints <= 0)
 		return;
 
 	int16_t* temp = new(std::nothrow) int16_t[g_numWaypoints * g_numWaypoints];
@@ -1978,7 +2017,7 @@ void Waypoint::InitPathMatrix(void)
 		return;
 
 	if (LoadPathMatrix())
-		return; // matrix loaded from the file
+		return;
 
 	ServerPrint("PLEASE WAIT UNTIL DISTANCE MATRIX CALCULATION FINISHES!");
 	ServerPrint("YOU CAN DISABLE THIS BY SETTING ebot_disable_path_matrix TO 1");
@@ -1998,6 +2037,9 @@ struct MatrixWorkerArgs
 
 void MatrixWorker(Waypoint* wpt, int16_t* distMatrix, tthread::atomic<int>& nextStartNode, int16_t num)
 {
+	if (!wpt || !distMatrix || num <= 0 || num > 10000)
+		return;
+
 	constexpr int16_t INF = static_cast<int16_t>(32766);
 	constexpr int16_t pnum = static_cast<int16_t>(Const_MaxPathIndex);
 
@@ -2024,6 +2066,20 @@ void MatrixWorker(Waypoint* wpt, int16_t* distMatrix, tthread::atomic<int>& next
 		if (position)
 			delete[] position;
 
+		return;
+	}
+
+	const int32_t matrixSize = static_cast<int32_t>(num) * static_cast<int32_t>(num);
+	const int32_t maxMatrixSize = 10000 * 10000;  // Safety limit
+
+	if (matrixSize > maxMatrixSize)
+	{
+		ServerPrint("Matrix size %d too large, aborting calculation!", matrixSize);
+		delete[] dist;
+		delete[] visited;
+		delete[] heapKey;
+		delete[] heapId;
+		delete[] position;
 		return;
 	}
 
@@ -2192,6 +2248,13 @@ void CalculateMatrix(void* arg)
 	}
 
 	const int16_t num = static_cast<int16_t>(g_numWaypoints);
+	if (num <= 0)
+	{
+		ServerPrint("numWaypoints is %d in %s at %i", num, __FILE__, __LINE__);
+		g_isMatrixCalculating = false;
+		return;
+	}
+
 	tthread::atomic<int> nextStartNode(0);
 
 	unsigned int numThreads = tthread::thread::hardware_concurrency();
@@ -2199,7 +2262,7 @@ void CalculateMatrix(void* arg)
 		ServerPrint("FOUND %i THREADS FOR MATRIX CALCULATIONS", numThreads);
 	else
 	{
-		MatrixWorker(wpt, distMatrix, nextStartNode, 1);
+		MatrixWorker(wpt, distMatrix, nextStartNode, num);
 		return;
 	}
 
@@ -2315,23 +2378,30 @@ void CalculateMatrix(void* arg)
 	CreatePath(matrixFilePath);
 
 	FormatBuffer(matrixFilePath, "%smatrix/%s.emt", waypointDir, mapName);
-	File fp(matrixFilePath, "wb");
 
-	// unable to open file
-	if (!fp.IsValid())
+	// Prepare data: waypoint count + matrix data (for proper compression)
+	uint8_t* matrixData = (uint8_t*)wpt->m_distMatrix.Get();
+	const int matrixSize = g_numWaypoints * g_numWaypoints * sizeof(int16_t);
+	const int totalSize = sizeof(int16_t) + matrixSize;
+
+	uint8_t* totalData = new(std::nothrow) uint8_t[totalSize];
+	if (!totalData)
 	{
 		g_isMatrixCalculating = false;
 		return;
 	}
+	*(int16_t*)totalData = g_numWaypoints;
+	cmemcpy(totalData + sizeof(int16_t), matrixData, matrixSize);
 
-	// write number of waypoints
-	fp.Write(&g_numWaypoints, sizeof(int16_t));
-
-	// write path & distance matrix
-	fp.Write(wpt->m_distMatrix.Get(), sizeof(int16_t), g_numWaypoints * g_numWaypoints);
-
-	// and close the file
-	fp.Close();
+	// Compress: header = 0 (embedded), data = totalData
+	if (Compressor::Compress(matrixFilePath, nullptr, 0, totalData, totalSize) == -1)
+	{
+		ServerPrint("WARNING: Failed to compress matrix file!");
+		delete[] totalData;
+		g_isMatrixCalculating = false;
+		return;
+	}
+	delete[] totalData;
 
 	g_isMatrixCalculating = false;
 }
@@ -2343,6 +2413,8 @@ void Waypoint::SavePathMatrix(void)
 
 	if (g_isMatrixCalculating)
 		return;
+
+	g_isMatrixCalculating = true;
 
 	// pre-resize g_matrixThreads to ensure Push doesn't fail due to allocation limits
 	bool success = true;
@@ -2392,26 +2464,75 @@ bool Waypoint::LoadPathMatrix(void)
 	FormatBuffer(matrixFilePath, "%smatrix/%s.emt", waypointDir, mapName);
 	File fp(matrixFilePath, "rb");
 
-	// file doesn't exists return false
+	// file doesn't exist return false
 	if (!fp.IsValid())
 		return false;
 
-	// read number of waypoints
-	int16_t num = 0;
-	fp.Read(&num, sizeof(int16_t));
-	if (num != g_numWaypoints)
+	// Get file size to check if it's compressed (compressed files are smaller)
+	const int matrixSize = g_numWaypoints * g_numWaypoints * sizeof(int16_t);
+	const int totalSize = sizeof(int16_t) + matrixSize;
+	const int uncompressedSize = totalSize;
+
+	// Allocate buffer for compressed data (larger than uncompressed to be safe)
+	uint8_t* totalData = new(std::nothrow) uint8_t[uncompressedSize + 1024];
+	if (!totalData)
 	{
 		fp.Close();
+		return false;
+	}
+
+	// Uncompress: headerSize = 0 (embedded), buffer = totalData
+	int result = Compressor::Uncompress(matrixFilePath, 0, totalData, uncompressedSize);
+	fp.Close();
+
+	if (result == -1 || result < totalSize)
+	{
+		ServerPrint("WARNING: Failed to uncompress matrix file or data truncated!");
+		delete[] totalData;
 		unlink(matrixFilePath);
 		SavePathMatrix();
 		return false;
 	}
 
-	// read path & distance matrixes
-	fp.Read(m_distMatrix.Get(), sizeof(int16_t), g_numWaypoints * g_numWaypoints);
+	// Verify waypoint count
+	int16_t num = *(int16_t*)totalData;
+	if (num != g_numWaypoints)
+	{
+		ServerPrint("WARNING: Matrix waypoint count mismatch (%d vs %d)!", num, g_numWaypoints);
+		delete[] totalData;
+		unlink(matrixFilePath);
+		SavePathMatrix();
+		return false;
+	}
 
-	// and close the file
-	fp.Close();
+	// Copy matrix data
+	uint8_t* matrixData = (uint8_t*)m_distMatrix.Get();
+	cmemcpy(matrixData, totalData + sizeof(int16_t), matrixSize);
+	delete[] totalData;
+
+	// Validate loaded matrix data - check for obviously corrupted values
+	bool validMatrix = true;
+	for (int16_t i = 0; i < num && validMatrix; i++)
+	{
+		for (int16_t j = 0; j < num && validMatrix; j++)
+		{
+			int16_t val = *(matrixData + (i * num) + j);
+			if (val < 0)
+			{
+				validMatrix = false;
+				break;
+			}
+		}
+	}
+
+	if (!validMatrix)
+	{
+		ServerPrint("WARNING: Loaded matrix data appears corrupted! Recalculating...");
+		g_isMatrixReady = false;
+		SavePathMatrix();
+		return false;
+	}
+
 	g_isMatrixReady = true;
 	ServerPrint("Distance Matrix loaded from the file.");
 	return true;
@@ -3187,21 +3308,28 @@ void Waypoint::Think(void)
 	}
 }
 
-inline int GetFacingDistance(const int16_t& start, const int16_t& goal)
+int GetFacingDistance(const int16_t& start, const int16_t& goal)
 {
 	if (g_isMatrixReady && IsValidWaypoint(start) && IsValidWaypoint(goal))
-		return *(g_waypoint->m_distMatrix.Get() + (start * g_numWaypoints) + goal);
+	{
+		const int16_t dist = *(g_waypoint->m_distMatrix.Get() + (start * g_numWaypoints) + goal);
+		if (dist < 32766)
+			return dist;
+	}
 
 	return static_cast<int>(GetVectorDistanceSSE(g_waypoint->GetPath(start)->origin, g_waypoint->GetPath(goal)->origin));
 }
 
-inline int GetDirectDistance(const int16_t& start, const int16_t& goal)
+int GetDirectDistance(const int16_t& start, const int16_t& goal)
 {
 	return static_cast<int>(GetVectorDistanceSSE(g_waypoint->GetPath(start)->origin, g_waypoint->GetPath(goal)->origin));
 }
 
 void Waypoint::ShowWaypointMsg(void)
 {
+	if (g_numWaypoints < 1)
+		return;
+
 	if (FNullEnt(g_hostEntity))
 		return;
 
@@ -3360,7 +3488,7 @@ void Waypoint::ShowWaypointMsg(void)
 	else
 	{
 		int16_t i;
-		for (i = (g_numWaypoints - 1); i; i--)
+		for (i = g_numWaypoints; i > 0; i--)
 			update(i);
 	}
 
@@ -3818,6 +3946,7 @@ Path* Waypoint::GetPath(const int16_t id)
 	{
 		if (g_numWaypoints > 0)
 			return &m_paths[crandomint(0, g_numWaypoints - 1)];
+
 		return nullptr;
 	}
 

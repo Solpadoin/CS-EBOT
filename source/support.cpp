@@ -23,7 +23,6 @@
 //
 
 #include "../include/core.h"
-#include "../include/studiohdr.h"
 
 //
 // TODO:
@@ -133,94 +132,6 @@ Vector GetWalkablePosition(const Vector& origin, edict_t* ent, const bool return
 		return nullvec; // return nullvector for check if we can't hit the ground
 
 	return origin; // return original origin, we cant hit to ground
-}
-
-// this expanded function returns the vector origin of a bounded entity, assuming that any
-// entity that has a bounding box has its center at the center of the bounding box itself.
-Vector GetEntityOrigin(edict_t* ent)
-{
-	if (FNullEnt(ent))
-		return nullvec;
-
-	Vector entityOrigin = ent->v.origin;
-	if (entityOrigin.IsNull())
-		entityOrigin = ent->v.absmin + (ent->v.size * 0.5f);
-
-	return entityOrigin;
-}
-
-Vector GetBoxOrigin(edict_t* ent)
-{
-	if (FNullEnt(ent))
-		return nullvec;
-
-	return ent->v.absmin + (ent->v.size * 0.5f);
-}
-
-Vector GetTopOrigin(edict_t* ent)
-{
-	if (FNullEnt(ent))
-		return nullvec;
-
-	const Vector origin = GetEntityOrigin(ent);
-	Vector topOrigin = origin + ent->v.maxs;
-	if (topOrigin.z < origin.z)
-		topOrigin = origin + ent->v.mins;
-
-	topOrigin.x = origin.x;
-	topOrigin.y = origin.y;
-	return topOrigin;
-}
-
-Vector GetBottomOrigin(edict_t* ent)
-{
-	if (FNullEnt(ent))
-		return nullvec;
-
-	const Vector origin = GetEntityOrigin(ent);
-	Vector bottomOrigin = origin + ent->v.mins;
-	if (bottomOrigin.z > origin.z)
-		bottomOrigin = origin + ent->v.maxs;
-
-	bottomOrigin.x = origin.x;
-	bottomOrigin.y = origin.y;
-	return bottomOrigin;
-}
-
-inline Vector FallBackOrigin(edict_t* ent)
-{
-	Vector headOrigin = GetTopOrigin(ent);
-	if (!(ent->v.flags & FL_DUCKING))
-		headOrigin.z -= (headOrigin.z - GetEntityOrigin(ent).z) * 0.4f;
-	else
-		headOrigin.z -= 1.0f;
-}
-
-Vector GetPlayerHeadOrigin(edict_t* ent)
-{
-	if (FNullEnt(ent))
-		return nullvec;
-
-	void* modelPtr = g_engfuncs.pfnGetModelPtr(ent);
-	if (!modelPtr)
-		return FallBackOrigin(ent);
-
-	studiohdr_t* studio = reinterpret_cast<studiohdr_t*>(modelPtr);
-
-	// 0x49445354 = 'I' 'D' 'S' 'T'
-	if (studio->id != 0x49445354)
-		return FallBackOrigin(ent);
-
-	int headHitbox = getHitboxByName(studio, "head");
-	if (headHitbox < 0)
-		return FallBackOrigin(ent);
-
-	mstudiohitbox_t* hitbox = getHitbox(studio, headHitbox);
-	Vector boneOrigin;
-	g_engfuncs.pfnGetBonePosition(ent, hitbox->bone, boneOrigin, nullptr);
-	boneOrigin += hitbox->bbmax * 0.5f;
-
-	return boneOrigin;
 }
 
 int Find(char* buffer, const char chr, const int startIndex)
@@ -1039,7 +950,7 @@ char* GetEntityName(edict_t* entity)
 	static char entityName[32];
 	if (!g_pGlobals || FNullEnt(entity))
 		cstrcpy(entityName, sizeof(entityName), "nullptr");
-	else if (entity->v.flags & FL_CLIENT || entity->v.flags & FL_FAKECLIENT)
+	else if (entity->v.flags & (FL_CLIENT | FL_FAKECLIENT))
 		cstrncpy(entityName, STRING(entity->v.netname), sizeof(entityName));
 	else
 		cstrncpy(entityName, STRING(entity->v.classname), sizeof(entityName));

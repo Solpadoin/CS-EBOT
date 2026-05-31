@@ -30,6 +30,8 @@ inline void RoundEndMessage(void)
 	{
 		if (bot)
 		{
+			bot->m_nearestEnemy = nullptr;
+			bot->m_nearestFriend = nullptr;
 			bot->m_hasEnemiesNear = false;
 			bot->m_hasFriendsNear = false;
 			bot->m_hasEntitiesNear = false;
@@ -275,7 +277,7 @@ void NetworkMsg::Execute(void)
 				}
 				case 'R':
 				{
-					if (!cstrncmp(x, "#Round_Draw", 11))
+					if (!cstrncmp(x, "#Round_Draw", 11) || !cstrncmp(x, "#Round_End", 10))
 						RoundEndMessage();
 					break;
 				}

@@ -150,7 +150,8 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 				if (!str || str[0] == '\0')
 					return false;
 
-				for (int i = 0; str[i] != '\0'; i++)
+				int i;
+				for (i = 0; str[i] != '\0'; i++)
 				{
 					if (str[i] < 'a' || str[i] > 'z')
 						return false;
@@ -237,7 +238,7 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 					if (crandomfloat(0.0f, 1.0f) < 0.36f)
 					{
 						const char* wrappers[] = {
-							"xxX", "Xxx", "xXx", "xx", "XX", "xX", "Xx", "[]", "<>", "--", "__", "-->", "<--", ".."
+							"xxX", "Xxx", "xXx", "xx", "XX", "xX", "Xx", "[", "]", "<", ">", "--", "__", "-->", "<--", "..", "-=", "=-"
 						};
 
 						int wIdx = crandomint(0, 13);
@@ -262,13 +263,14 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 							cstrcat(bName, sizeof(bName), suf);
 					}
 
-					// Typo / mutation
+					// typo / mutation
 					if (crandomfloat(0.0f, 1.0f) < 0.01f && cstrlen(bName) > 3)
 					{
 						int mode = crandomint(0, 2);
 						int bNameLen = cstrlen(bName);
 						if (mode == 0)
 						{
+							int k;
 							int index = crandomint(0, bNameLen - 1);
 							for (int j = index; j < bNameLen; j++)
 								bName[j] = bName[j + 1];
@@ -278,8 +280,10 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 							int index = crandomint(0, bNameLen - 1);
 							if (bNameLen + 1 < static_cast<int>(sizeof(bName)) - 1)
 							{
-								for (int j = bNameLen; j > index; j--)
+								int j;
+								for (j = bNameLen; j > index; j--)
 									bName[j + 1] = bName[j];
+
 								bName[index + 1] = bName[index];
 								bName[bNameLen + 1] = '\0';
 							}
@@ -289,9 +293,7 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 							const char* letters = "abcdefghijklmnopqrstuvwxyz";
 							int index = crandomint(0, bNameLen - 1);
 							if ((bName[index] >= 'a' && bName[index] <= 'z') || (bName[index] >= 'A' && bName[index] <= 'Z'))
-							{
 								bName[index] = letters[crandomint(0, 25)];
-							}
 						}
 					}
 
@@ -299,7 +301,8 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 					int bNameLen = cstrlen(bName);
 					if (caseRand < 0.11f)
 					{
-						for (int j = 0; j < bNameLen; j++)
+						int j;
+						for (j = 0; j < bNameLen; j++)
 						{
 							if (bName[j] >= 'a' && bName[j] <= 'z')
 								bName[j] -= 32;
@@ -307,8 +310,9 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 					}
 					else if (caseRand < 0.22f)
 					{
+						int j;
 						bool nextUpper = true;
-						for (int j = 0; j < bNameLen; j++)
+						for (j = 0; j < bNameLen; j++)
 						{
 							if (bName[j] == ' ' || bName[j] == '_' || bName[j] == '-')
 								nextUpper = true;
@@ -316,6 +320,7 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 							{
 								if (bName[j] >= 'a' && bName[j] <= 'z')
 									bName[j] -= 32;
+
 								nextUpper = false;
 							}
 							else
@@ -327,7 +332,8 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 					}
 					else if (caseRand < 0.28f)
 					{
-						for (int j = 0; j < bNameLen; j++)
+						int j;
+						for (j = 0; j < bNameLen; j++)
 						{
 							if (((bName[j] >= 'a' && bName[j] <= 'z') || (bName[j] >= 'A' && bName[j] <= 'Z')) && crandomfloat(0.0f, 1.0f) < 0.35f)
 							{
@@ -943,35 +949,7 @@ Bot::Bot(edict_t* bot, const int skill, const int personality, const int team, c
 
 Bot::~Bot(void)
 {
-	const char* name = GetEntityName(GetEntity());
 	m_navNode.Destroy();
-	if (IsNullString(name))
-		return;
-
-	int16_t i;
-	char botName[64];
-	for (i = 0; i < g_botNames.Size(); i++)
-	{
-		if (!cstrcmp(g_botNames[i].name, name))
-		{
-			g_botNames[i].isUsed = false;
-			break;
-		}
-
-		snprintf(botName, sizeof(botName), "[E-BOT] %s", g_botNames[i].name);
-		if (!cstrcmp(botName, name))
-		{
-			g_botNames[i].isUsed = false;
-			break;
-		}
-
-		snprintf(botName, sizeof(botName), "[E-BOT] %s (%i)", g_botNames[i].name, m_skill);
-		if (!cstrcmp(botName, name))
-		{
-			g_botNames[i].isUsed = false;
-			break;
-		}
-	}
 }
 
 // this function initializes a bot after creation & at the start of each round
@@ -1008,6 +986,13 @@ void Bot::NewRound(void)
 	SetProcess(Process::Default, "i have respawned", true, time2 + 9999.0f);
 	m_rememberedProcess = Process::Default;
 	m_rememberedProcessTime = 0.0f;
+
+	m_currentWaypointIndex = -1;
+	m_prevWptIndex[0] = -1;
+	m_prevWptIndex[1] = -1;
+	m_prevWptIndex[2] = -1;
+	m_prevWptIndex[3] = -1;
+	FindWaypoint();
 
 	if (!g_waypoint->m_zmHmPoints.IsEmpty())
 	{

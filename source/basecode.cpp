@@ -216,7 +216,7 @@ bool Bot::CheckReachable(void)
 	if (Math::FltZero(m_enemyDistance))
 		return m_isEnemyReachable = true;
 
-	const int nearest = g_clients[ENTINDEX(m_nearestEnemy) - 1].wp;
+	const int16_t nearest = g_clients[ENTINDEX(m_nearestEnemy) - 1].wp;
 	if (m_currentWaypointIndex == nearest || m_prevWptIndex[0] == nearest)
 		return m_isEnemyReachable = true;
 
@@ -230,10 +230,65 @@ bool Bot::CheckReachable(void)
 
 		if (m_waypoint.flags & WAYPOINT_ZOMBIEPUSH)
 		{
-			if ((pev->origin - m_nearestEnemy->v.origin).GetLengthSquared() < squaredf(32.0f))
+			if ((pev->origin - m_nearestEnemy->v.origin).GetLengthSquared() < squaredf(36.0f))
 				return m_isEnemyReachable = true;
 
 			return m_isEnemyReachable = false;
+		}
+
+		if (m_personality == Personality::Rusher)
+		{
+			m_isEnemyReachable = false;
+			if (m_currentTravelFlags & PATHFLAG_JUMP)
+				return m_isEnemyReachable;
+
+			int16_t movePoint = 0;
+			bool pathNeedsJump = false;
+			const int16_t destIndex = nearest;
+
+			if (IsValidWaypoint(destIndex))
+			{
+				if (m_currentWaypointIndex == destIndex || m_prevWptIndex[0] == destIndex)
+					m_isEnemyReachable = true;
+				else if (m_navNode.HasNext() && m_navNode.Last() == destIndex)
+				{
+					Path* path;
+					int16_t i, j, fromIndex, toIndex;
+					const int16_t length = cmin(m_navNode.Length(), static_cast<int16_t>(99));
+					for (i = 0; i < length - 1; i++)
+					{
+						fromIndex = m_navNode.Get(i);
+						if (!IsValidWaypoint(fromIndex))
+							break;
+
+						toIndex = m_navNode.Get(i + 1);
+						if (!IsValidWaypoint(toIndex))
+							break;
+
+						path = g_waypoint->GetPath(fromIndex);
+						if (!path)
+							break;
+
+						movePoint++;
+						for (j = 0; j < Const_MaxPathIndex; j++)
+						{
+							if (path->index[j] == toIndex && (path->connectionFlags[j] & PATHFLAG_JUMP))
+							{
+								pathNeedsJump = true;
+								break;
+							}
+						}
+
+						if (pathNeedsJump)
+							break;
+					}
+				}
+			}
+
+			if (!pathNeedsJump && ((m_enemyDistance < 150.0f && movePoint <= 4) || movePoint <= 2))
+				m_isEnemyReachable = true;
+
+			return m_isEnemyReachable;
 		}
 
 		if (pev->flags & FL_DUCKING || m_nearestEnemy->v.flags & FL_DUCKING) // diff 1
@@ -246,6 +301,16 @@ bool Bot::CheckReachable(void)
 	}
 	else
 	{
+		if (m_personality == Personality::Careful && g_isMatrixReady && IsValidWaypoint(nearest))
+		{
+			if ((GetFacingDistance(m_currentWaypointIndex, nearest) - (m_enemyOrigin - pev->origin).GetLength()) > 112.0f)
+				m_isEnemyReachable = false;
+			else
+				m_isEnemyReachable = true;
+
+			return m_isEnemyReachable;
+		}
+
 		if (pev->flags & FL_DUCKING && m_nearestEnemy->v.flags & FL_DUCKING) // diff 2
 		{
 			if ((pev->origin - m_nearestEnemy->v.origin).GetLengthSquared() > squaredf(128.0f))
@@ -674,11 +739,10 @@ void Bot::BaseUpdate(void)
 
 			if (m_updateLooking)
 			{
-				if (!m_lookVelocity.IsNull())
+				if (m_aimingAtEnemy && m_hasEnemiesNear && !FNullEnt(m_nearestEnemy))
 				{
-					m_lookAt.x += m_lookVelocity.x * m_pathInterval;
-					m_lookAt.y += m_lookVelocity.y * m_pathInterval;
-					m_lookAt.z += m_lookVelocity.z * m_pathInterval;
+					m_enemyOrigin = GetPlayerHeadOrigin(m_nearestEnemy, (pev->origin - m_nearestEnemy->v.origin).GetLengthSquared(), m_currentWeapon, m_skill);
+					m_lookAt = m_enemyOrigin;
 				}
 
 				const float lockn = 0.128f / m_pathInterval;
@@ -850,10 +914,13 @@ void Bot::CheckSlowThink(void)
 	CalculatePing();
 
 	const float tempTimer = engine->GetTime();
-	if (m_waypointDistance > ((pev->origin - m_waypointOrigin).GetLengthSquared() * 2.0f))
+	if ((pev->origin - m_waypointOrigin).GetLengthSquared() > (m_waypointDistance * 2.0f))
 	{
-		m_navNode.Clear();
 		FindWaypoint();
+		if (!m_isZombieBot && IsValidWaypoint(m_zhCampPointIndex))
+			FindPath(m_currentWaypointIndex, m_zhCampPointIndex);
+		else
+			m_navNode.Clear();
 	}
 	else if (m_waypointTime < tempTimer)
 	{
@@ -861,8 +928,11 @@ void Bot::CheckSlowThink(void)
 			m_waypointTime = tempTimer + 7.0f;
 		else
 		{
-			m_navNode.Clear();
 			FindWaypoint();
+			if (!m_isZombieBot && IsValidWaypoint(m_zhCampPointIndex))
+				FindPath(m_currentWaypointIndex, m_zhCampPointIndex);
+			else
+				m_navNode.Clear();
 			return;
 		}
 	}
@@ -961,8 +1031,6 @@ void Bot::CheckSlowThink(void)
 				m_startAction = CMENU_TEAM;
 			else
 				m_startAction = CMENU_CLASS;
-
-			return;
 		}
 
 		if (m_isZombieBot != IsZombieEntity(GetEntity()))
@@ -979,6 +1047,7 @@ void Bot::CheckSlowThink(void)
 			const Path zhPath = g_waypoint->m_paths[m_zhCampPointIndex];
 			if (!(zhPath.flags & WAYPOINT_ZMHMCAMP) && !(zhPath.flags & WAYPOINT_HMCAMPMESH))
 			{
+				m_myMeshWaypoint = -1;
 				m_zhCampPointIndex = -1;
 				FindGoalHuman();
 			}
@@ -1000,18 +1069,18 @@ void Bot::CheckSlowThink(void)
 				}
 			}
 		}
-	}
 
-	// zp & biohazard flashlight support
-	if (ebot_force_flashlight.GetBool())
-	{
-		if (!m_isZombieBot && !(pev->effects & EF_DIMLIGHT) && m_impulse != 100)
-			m_impulse = 100;
-	}
-	else
-	{
-		if (pev->effects & EF_DIMLIGHT && m_impulse != 100)
-			m_impulse = 100;
+		// zp & biohazard flashlight support
+		if (ebot_force_flashlight.GetBool())
+		{
+			if (!m_isZombieBot && !(pev->effects & EF_DIMLIGHT) && m_impulse != 100)
+				m_impulse = 100;
+		}
+		else
+		{
+			if (pev->effects & EF_DIMLIGHT && m_impulse != 100)
+				m_impulse = 100;
+		}
 	}
 }
 
@@ -1025,13 +1094,14 @@ bool Bot::IsAttacking(const edict_t *player)
 
 void Bot::UpdateLooking(void)
 {
+	m_aimingAtEnemy = false;
 	if (m_isZombieBot)
 	{
 		if (m_hasEntitiesNear && m_entityDistance < 384.0f && (m_entityDistance < m_enemyDistance || !m_hasEnemiesNear))
 		{
 			if (!FNullEnt(m_nearestEntity))
 			{
-				LookAt(GetBoxOrigin(m_nearestEntity), m_nearestEntity->v.velocity);
+				LookAt(GetBoxOrigin(m_nearestEntity));
 				FireWeapon(m_entityDistance);
 				return;
 			}
@@ -1039,9 +1109,10 @@ void Bot::UpdateLooking(void)
 
 		if (m_hasEnemiesNear && (m_isEnemyReachable || m_enemyDistance < 384.0f) && IsAlive(m_nearestEnemy))
 		{
+			m_aimingAtEnemy = true;
 			if (CheckVisibility(m_nearestEnemy))
 			{
-				LookAt(m_enemyOrigin, m_nearestEnemy->v.velocity);
+				LookAt(m_enemyOrigin);
 				FireWeapon(m_enemyDistance);
 			}
 			else
@@ -1058,7 +1129,7 @@ void Bot::UpdateLooking(void)
 	{
 		if (!FNullEnt(m_nearestEntity))
 		{
-			LookAt(GetBoxOrigin(m_nearestEntity), m_nearestEntity->v.velocity);
+			LookAt(GetBoxOrigin(m_nearestEntity));
 			FireWeapon(m_entityDistance);
 			return;
 		}
@@ -1066,9 +1137,10 @@ void Bot::UpdateLooking(void)
 
 	if (m_hasEnemiesNear && IsAlive(m_nearestEnemy))
 	{
+		m_aimingAtEnemy = true;
 		if (CheckVisibility(m_nearestEnemy))
 		{
-			LookAt(m_enemyOrigin, m_nearestEnemy->v.velocity);
+			LookAt(m_enemyOrigin);
 			FireWeapon(m_enemyDistance);
 		}
 		else
@@ -1080,7 +1152,7 @@ void Bot::UpdateLooking(void)
 	if (m_enemySeeTime + 8.0f > engine->GetTime() && m_team != GetTeam(m_nearestEnemy))
 	{
 		if (IsAlive(m_nearestEnemy))
-			LookAt(m_nearestEnemy->v.origin + m_nearestEnemy->v.view_ofs, m_nearestEnemy->v.velocity);
+			LookAt(m_nearestEnemy->v.origin + m_nearestEnemy->v.view_ofs);
 		else
 			LookAt(m_enemyOrigin);
 
@@ -1093,7 +1165,6 @@ void Bot::UpdateLooking(void)
 void Bot::LookAtAround(void)
 {
 	m_updateLooking = true;
-	m_lookVelocity = nullvec;
 	if (m_waypoint.flags & WAYPOINT_USEBUTTON)
 	{
 		const Vector origin = m_waypoint.origin;

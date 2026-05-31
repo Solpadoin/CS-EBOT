@@ -720,18 +720,11 @@ void InitConfig(void)
 				NameItem item;
 
 				cstrncpy(item.name, line, sizeof(item.name));
-				item.isUsed = false;
 				g_botNames.Push(item);
 			}
 
 			fp.Close();
 		}
-	}
-	else
-	{
-		int16_t i;
-		for (i = 0; i < g_botNames.Size(); i++)
-			g_botNames[i].isUsed = false;
 	}
 
 	// AVATARS INITITALIZATION
@@ -790,6 +783,9 @@ int Spawn(edict_t* ent)
 	// and any MOD is supposed to implement one for each of its entities.
 	const char* entityClassname = STRING(ent->v.classname);
 	if (IsNullString(entityClassname))
+		RETURN_META_VALUE(MRES_IGNORED, 0);
+
+	if (!entityClassname[0])
 		RETURN_META_VALUE(MRES_IGNORED, 0);
 
 	switch (entityClassname[0])
@@ -3008,7 +3004,7 @@ C_DLLEXPORT void Amxx_EBotSetLookAt(int index, Vector look, Vector vel)
 	Bot* amxxbot = g_botManager->GetBot(index);
 	if (amxxbot)
 	{
-		amxxbot->LookAt(look, vel);
+		amxxbot->LookAt(look); // TODO: RE ADD VEL
 		amxxbot->m_pauseTime = engine->GetTime() + 1.25f;
 	}
 }

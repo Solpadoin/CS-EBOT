@@ -63,7 +63,13 @@ inline float GetDistance(const int16_t& start, const int16_t& goal)
 		return 999999999.0f;
 
 	if (g_isMatrixReady)
-		return static_cast<float>(*(g_waypoint->m_distMatrix.Get() + (start * g_numWaypoints) + goal));
+	{
+		const int16_t dist = *(g_waypoint->m_distMatrix.Get() + (start * g_numWaypoints) + goal);
+		if (dist >= 32766)
+			return GetVectorDistanceSSE(g_waypoint->m_paths[start].origin, g_waypoint->m_paths[goal].origin);
+
+		return static_cast<float>(dist);
+	}
 
 	return GetVectorDistanceSSE(g_waypoint->m_paths[start].origin, g_waypoint->m_paths[goal].origin);
 }
@@ -75,16 +81,14 @@ void Bot::FindFriendsAndEnemiens(void)
 	m_numFriendsNear = 0;
 	m_hasEnemiesNear = false;
 	m_hasFriendsNear = false;
+	m_enemyDistance = 999999.0f;
+	m_friendDistance = 999999.0f;
 	if (g_roundEnded)
 	{
-		m_enemyDistance = -1.0f;
-		m_friendDistance = -1.0f;
 		m_nearestEnemy = nullptr;
 		m_nearestFriend = nullptr;
 		return;
 	}
-	m_enemyDistance = 999999.0f;
-	m_friendDistance = 999999.0f;
 
 	float distance;
 	TraceResult tr;
@@ -235,15 +239,19 @@ void Bot::FindFriendsAndEnemiens(void)
 	if (m_hasEnemiesNear)
 	{
 		m_enemySeeTime = engine->GetTime();
-		m_enemyOrigin = GetPlayerHeadOrigin(m_nearestEnemy);
+
+		if (!FNullEnt(m_nearestEnemy)) // we need 2d distance
+			m_enemyOrigin = GetPlayerHeadOrigin(m_nearestEnemy, (myOrigin - m_nearestEnemy->v.origin).GetLengthSquared(), m_currentWeapon, m_skill);
 	}
 	else
 		m_isEnemyReachable = false;
 
 	if (m_hasFriendsNear)
 	{
-		m_friendOrigin = m_nearestFriend->v.origin;
 		m_friendSeeTime = engine->GetTime();
+
+		if (!FNullEnt(m_nearestFriend))
+			m_friendOrigin = m_nearestFriend->v.origin;
 	}
 }
 
@@ -251,13 +259,12 @@ void Bot::FindEnemyEntities(void)
 {
 	m_numEntitiesLeft = 0;
 	m_hasEntitiesNear = false;
+	m_entityDistance = 999999.0f;
 	if (g_roundEnded)
 	{
-		m_entityDistance = -1.0f;
 		m_nearestEntity = nullptr;
 		return;
 	}
-	m_entityDistance = 999999.0f;
 
 	int i;
 	Vector origin;
@@ -273,12 +280,11 @@ void Bot::FindEnemyEntities(void)
 			continue;
 
 		m_numEntitiesLeft++;
-		distance = (myOrigin - origin).GetLengthSquared();
+		m_entityOrigin = GetBoxOrigin(entity);
+		distance = (myOrigin - m_entityOrigin).GetLengthSquared();
 		if (distance < m_entityDistance)
 		{
-			// simple check
-			origin = GetBoxOrigin(entity);
-			TraceLine(myOrigin, origin, TraceIgnore::Everything, GetEntity(), &tr);
+			TraceLine(myOrigin, m_entityOrigin, TraceIgnore::Everything, GetEntity(), &tr);
 			if (tr.flFraction < 1.0f)
 			{
 				if (!FNullEnt(tr.pHit) && tr.pHit != entity)
@@ -293,7 +299,6 @@ void Bot::FindEnemyEntities(void)
 
 	if (m_hasEntitiesNear)
 	{
-		m_entityOrigin = GetBoxOrigin(m_nearestEntity);
 		m_entityDistance = csqrtf(m_entityDistance);
 		m_entitySeeTime = engine->GetTime();
 	}
@@ -437,28 +442,61 @@ void Bot::FireWeapon(const float distance)
 
 void Bot::KnifeAttack(void)
 {
-	Vector origin;
-	if (!m_hasEntitiesNear || m_enemyDistance < m_entityDistance)
-		origin = m_enemyOrigin;
-	else
-		origin = m_entityOrigin;
+	edict_t* entity = nullptr;
+	float distance = 9999.0f;
 
-	const float distance = (pev->origin - origin).GetLengthSquared2D();
-	if (distance < squaredf(64.0f))
-		m_buttons |= IN_ATTACK;
-	else if (distance < pev->velocity.GetLengthSquared2D())
-		m_buttons |= IN_ATTACK2;
-
-	if (pev->origin.z > origin.z && distance < squaredf(54.0f))
+	if (m_hasEnemiesNear && !FNullEnt(m_nearestEnemy))
 	{
-		m_duckTime = engine->GetTime() + 1.0f;
-		m_buttons &= ~IN_JUMP;
+		entity = m_nearestEnemy;
+		distance = (pev->origin - GetEntityOrigin(m_nearestEnemy)).GetLengthSquared2D();
 	}
-	else
+
+	if (!FNullEnt(m_breakableEntity) && m_breakableOrigin != nullvec)
 	{
-		m_duckTime = 0.0f;
-		if (IsOnFloor() && chanceof(15) && pev->origin.z + 150.0f < origin.z && distance < squaredf(150.0f))
-			m_buttons |= IN_JUMP;
+		const float breakableDist = (pev->origin - m_breakableOrigin).GetLengthSquared2D();
+		if (breakableDist < distance)
+		{
+			entity = m_breakableEntity;
+			distance = breakableDist;
+		}
+	}
+
+	if (FNullEnt(entity))
+		return;
+
+	constexpr float kad1 = 64.0f * 64.0f;
+	constexpr float kad2 = 64.0f * 64.0f;
+
+	int kaMode = 0;
+	if (distance < kad1)
+		kaMode = 1;
+	if (distance < kad2)
+		kaMode += 2;
+
+	if (kaMode > 0)
+	{
+		const Vector entityOrigin = GetEntityOrigin(entity);
+		const float distanceSkipZ = (pev->origin - entityOrigin).GetLengthSquared2D();
+		if (distanceSkipZ < squaredf(64.0f) && pev->origin.z > entityOrigin.z)
+		{
+			m_duckTime = engine->GetTime() + 1.0f;
+			m_buttons &= ~IN_JUMP;
+		}
+		else
+		{
+			m_duckTime = 0.0f;
+			if (IsOnFloor() && chanceof(15) && pev->origin.z + 150.0f < entityOrigin.z && distanceSkipZ < squaredf(300.0f))
+				m_buttons |= IN_JUMP;
+		}
+
+		if (kaMode == 1)
+			m_buttons |= IN_ATTACK;
+		else if (kaMode == 2)
+			m_buttons |= IN_ATTACK2;
+		else if (chanceof(30))
+			m_buttons |= IN_ATTACK;
+		else
+			m_buttons |= IN_ATTACK2;
 	}
 }
 
