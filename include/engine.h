@@ -2134,8 +2134,6 @@ typedef enum
 	point_hull = 0, human_hull = 1, large_hull = 2, head_hull = 3
 } HULL;
 
-extern Vector GetEntityOrigin(entvars_t* pevBModel);
-
 #define AMBIENT_SOUND_STATIC			0		 // medium radius attenuation
 #define AMBIENT_SOUND_EVERYWHERE		1
 #define AMBIENT_SOUND_SMALLRADIUS		 2

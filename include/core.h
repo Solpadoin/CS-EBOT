@@ -423,7 +423,6 @@ public:
 struct NameItem
 {
 	char name[32];
-	bool isUsed{false};
 };
 
 struct WeaponSelect
@@ -550,7 +549,8 @@ public:
 	Vector m_throw{nullvec}; // origin of waypoint to throw grenades
 	Vector m_lookAt{nullvec}; // vector bot should look at
 	Vector m_lastAt{nullvec};
-	Vector m_lookVelocity{nullvec};
+
+	bool m_aimingAtEnemy{false};
 	bool m_updateLooking{false};
 	bool m_updateY{false};
 	bool m_updateP{false};
@@ -850,7 +850,7 @@ public:
 	inline Vector Center(void) { return (pev->absmax + pev->absmin) * 0.5f; };
 	inline Vector EyePosition(void) { return pev->origin + pev->view_ofs; };
 
-	void LookAt(const Vector &origin, const Vector &velocity = nullvec);
+	void LookAt(const Vector &origin);
 	void NewRound(void);
 
 	void CheckTouchEntity(edict_t *entity);
@@ -1148,12 +1148,131 @@ extern char *GetField(const char *string, const int fieldId, const bool endLine 
 extern void CreatePath(char *path);
 
 extern Vector GetWalkablePosition(const Vector &origin, edict_t *ent = nullptr, const bool returnNullVec = false, const float height = 1000.0f);
-extern Vector GetEntityOrigin(edict_t *ent);
-extern Vector GetBoxOrigin(edict_t *ent);
 
-extern Vector GetTopOrigin(edict_t *ent);
-extern Vector GetBottomOrigin(edict_t *ent);
-extern Vector GetPlayerHeadOrigin(edict_t *ent);
+inline Vector GetEntityOrigin(edict_t *ent)
+{
+	if (FNullEnt(ent))
+		return nullvec;
+
+	Vector entityOrigin = ent->v.origin;
+	if (entityOrigin.IsNull())
+		entityOrigin = ent->v.absmin + (ent->v.size * 0.5f);
+
+	return entityOrigin;
+}
+
+inline Vector GetBoxOrigin(edict_t *ent)
+{
+	if (FNullEnt(ent))
+		return nullvec;
+
+	return ent->v.absmin + (ent->v.size * 0.5f);
+}
+
+inline Vector GetTopOrigin(edict_t *ent)
+{
+	if (FNullEnt(ent))
+		return nullvec;
+
+	const Vector origin = GetEntityOrigin(ent);
+	Vector topOrigin = origin + ent->v.maxs;
+	if (topOrigin.z < origin.z)
+		topOrigin = origin + ent->v.mins;
+
+	topOrigin.x = origin.x;
+	topOrigin.y = origin.y;
+	return topOrigin;
+}
+
+inline Vector GetBottomOrigin(edict_t *ent)
+{
+	if (FNullEnt(ent))
+		return nullvec;
+
+	const Vector origin = GetEntityOrigin(ent);
+	Vector bottomOrigin = origin + ent->v.mins;
+	if (bottomOrigin.z > origin.z)
+		bottomOrigin = origin + ent->v.maxs;
+
+	bottomOrigin.x = origin.x;
+	bottomOrigin.y = origin.y;
+	return bottomOrigin;
+}
+
+inline Vector GetPlayerHeadOrigin(edict_t *ent, float distance = 0.0f, int weaponType = 0, int difficulty = 0)
+{
+	if (FNullEnt(ent))
+		return nullvec;
+
+	constexpr float dist = 2048.0f * 2048.0f;
+	constexpr float sprayDistance = 512.0f * 512.0f;
+	constexpr float sprayDistanceX2 = 1024.0f * 1024.0f;
+	constexpr float offsetRanges[9][3] =
+	{
+		{ 0.0f, 0.0f, 0.0f },
+		{ 0.0f, 0.0f, 0.0f },
+		{ 0.5f, -0.1f, -1.5f },
+		{ 6.5f, 6.0f, -2.0f },
+		{ 0.5f, -7.5f, -9.5f },
+		{ 0.5f, -7.5f, -9.5f },
+		{ 0.5f, -7.5f, -9.5f },
+		{ 0.0f, -2.5f, -6.0f },
+		{ 1.5f, -4.0f, -9.0f }
+	};
+
+	int simplifiedWeaponType = 2;
+	switch (weaponType)
+	{
+		case Weapon::Knife:
+			simplifiedWeaponType = 1;
+			break;
+		case Weapon::M3:
+		case Weapon::Xm1014:
+			simplifiedWeaponType = 3;
+			break;
+		case Weapon::Aug:
+		case Weapon::Sg552:
+			simplifiedWeaponType = 4;
+			break;
+		case Weapon::Ak47:
+		case Weapon::M4A1:
+		case Weapon::Famas:
+		case Weapon::Galil:
+			simplifiedWeaponType = 5;
+			break;
+		case Weapon::Mp5:
+		case Weapon::Ump45:
+		case Weapon::Mac10:
+		case Weapon::Tmp:
+		case Weapon::P90:
+			simplifiedWeaponType = 6;
+			break;
+		case Weapon::Awp:
+		case Weapon::G3SG1:
+		case Weapon::Scout:
+		case Weapon::Sg550:
+			simplifiedWeaponType = 7;
+			break;
+		case Weapon::M249:
+			simplifiedWeaponType = 8;
+			break;
+		default:
+			simplifiedWeaponType = 2;
+			break;
+	}
+
+	int distanceIndex = 2;
+	if (distance < dist && distance > sprayDistanceX2)
+		distanceIndex = 0;
+	else if (distance > sprayDistance && distance < sprayDistanceX2)
+		distanceIndex = 1;
+
+	float zOffset = 0.0f;
+	if (difficulty > 50 && !(ent->v.flags & FL_DUCKING))
+		zOffset = offsetRanges[simplifiedWeaponType][distanceIndex];
+
+	return Vector{ent->v.origin.x, ent->v.origin.y, ent->v.absmin.z + ent->v.size.z * 0.81f + zOffset};
+}
 
 extern void FreeLibraryMemory(void);
 extern void RoundInit(void);
@@ -1175,6 +1294,9 @@ extern void MOD_AddLogEntry(const int mode, char *format);
 
 extern void DisplayMenuToClient(edict_t *ent, MenuText *menu);
 
+extern int GetFacingDistance(const int16_t& start, const int16_t& goal);
+extern int GetDirectDistance(const int16_t& start, const int16_t& goal);
+
 extern void TraceLine(const Vector &start, const Vector &end, const int &ignoreFlags, edict_t *ignoreEntity, TraceResult *ptr);
 extern void TraceHull(const Vector &start, const Vector &end, const int &ignoreFlags, const int &hullNumber, edict_t *ignoreEntity, TraceResult *ptr);
 
@@ -1188,9 +1310,6 @@ inline bool IsNullString(const char *input)
 
 	return *input == '\0';
 }
-
-// very global convars
-extern ConVar ebot_gamemod;
 
 #include "compress.h"
 #include "globals.h"
