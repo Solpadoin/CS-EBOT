@@ -57,5 +57,8 @@ bool Bot::ThrowSMReq(void)
 	if (!IsOnFloor())
 		return false;
 
+	if (m_hasEnemiesNear && !m_isZombieBot)
+		return false;
+
 	return true;
 }

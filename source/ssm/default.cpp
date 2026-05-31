@@ -9,6 +9,8 @@ void Bot::DefaultUpdate(void)
 {
 	if (m_isZombieBot)
 	{
+		m_aimingAtEnemy = false;
+
 		// nearest enemy never resets to nullptr, so bot always know where are alive humans
 		if (IsAlive(m_nearestEnemy) && GetTeam(m_nearestEnemy) != m_team)
 		{
@@ -18,7 +20,7 @@ void Bot::DefaultUpdate(void)
 				if (!CheckVisibility(m_nearestEnemy))
 					m_isEnemyReachable = false;
 			}
-			else if (m_enemyDistance < 384.0f && chanceof(m_skill))
+			else if (m_enemyDistance < 512.0f && chanceof(m_skill))
 				KnifeAttack();
 
 			// path matrix returns 0 if we are on the same waypoint, so basically its reachable
@@ -32,7 +34,9 @@ void Bot::DefaultUpdate(void)
 					MoveTo(nextVec);
 				else
 					MoveTo(m_enemyOrigin);
-				LookAt(m_enemyOrigin, m_nearestEnemy->v.velocity);
+
+				m_aimingAtEnemy = true;
+				LookAt(m_enemyOrigin);
 
 				if (m_isSlowThink)
 				{
@@ -133,14 +137,17 @@ void Bot::DefaultUpdate(void)
 		else
 			UpdateLooking();
 	}
-	else
-	{
-		UpdateLooking();
-
-		if (m_isSlowThink)
+		else
 		{
-			FindEnemyEntities();
-			FindFriendsAndEnemiens();
+			UpdateLooking();
+
+			if (IsValidWaypoint(m_zhCampPointIndex))
+				m_currentGoalIndex = m_zhCampPointIndex;
+
+			if (m_isSlowThink)
+			{
+				FindEnemyEntities();
+				FindFriendsAndEnemiens();
 			CheckReachable();
 
 			// revert the zoom to normal
@@ -152,6 +159,7 @@ void Bot::DefaultUpdate(void)
 			if (!m_navNode.HasNext())
 			{
 				// find new safe spot
+				m_myMeshWaypoint = -1;
 				m_zhCampPointIndex = -1;
 				FindGoalHuman();
 
@@ -175,6 +183,7 @@ void Bot::DefaultUpdate(void)
 				if (IsValidWaypoint(firstWP) && IsValidWaypoint(nextWP) && ((pev->origin - g_waypoint->m_paths[firstWP].origin).GetLengthSquared() > ((m_nearestEnemy->v.origin + m_nearestEnemy->v.velocity) - g_waypoint->m_paths[firstWP].origin).GetLengthSquared() || (pev->origin - g_waypoint->m_paths[nextWP].origin).GetLengthSquared() > ((m_nearestEnemy->v.origin + m_nearestEnemy->v.velocity) - g_waypoint->m_paths[nextWP].origin).GetLengthSquared()) && ::IsInViewCone(pev->origin, m_nearestEnemy))
 				{
 					// find new safe spot if possible
+					m_myMeshWaypoint = -1;
 					m_zhCampPointIndex = -1;
 					FindGoalHuman();
 
@@ -227,6 +236,7 @@ void Bot::DefaultUpdate(void)
 			{
 				m_moveSpeed = pev->maxspeed;
 				m_zhCampPointIndex = -1;
+				m_myMeshWaypoint = -1;
 				FindGoalHuman();
 				return;
 			}
@@ -319,44 +329,8 @@ void Bot::DefaultUpdate(void)
 			else if (IsValidWaypoint(m_zhCampPointIndex))
 				FindPath(m_currentWaypointIndex, m_zhCampPointIndex);
 			else
-			{
 				m_zhCampPointIndex = FindGoalHuman();
-				if (!IsValidWaypoint(m_zhCampPointIndex))
-					m_zhCampPointIndex = static_cast<int16_t>(crandomint(0, g_numWaypoints - 1));
-
-				m_currentGoalIndex = m_zhCampPointIndex;
-			}
 		}
-	}
-
-	if (m_isSlowThink && m_navNode.IsEmpty())
-	{
-		if (m_currentWaypointIndex == m_currentGoalIndex)
-		{
-			if (m_isZombieBot)
-				m_currentGoalIndex = static_cast<int16_t>(crandomint(0, g_numWaypoints - 1));
-			else
-			{
-				bool isCampSpot = false;
-				if (IsValidWaypoint(m_currentWaypointIndex))
-				{
-					const Path &zhPath = g_waypoint->m_paths[m_currentWaypointIndex];
-					isCampSpot = (zhPath.flags & WAYPOINT_ZMHMCAMP) || (zhPath.flags & WAYPOINT_HMCAMPMESH);
-				}
-
-				if (!isCampSpot)
-				{
-					m_zhCampPointIndex = -1;
-					int16_t newGoal = FindGoalHuman();
-					if (newGoal == m_currentWaypointIndex || !IsValidWaypoint(newGoal))
-						newGoal = static_cast<int16_t>(crandomint(0, g_numWaypoints - 1));
-
-					m_currentGoalIndex = newGoal;
-				}
-			}
-		}
-		else
-			FindShortestPath(m_currentWaypointIndex, m_currentGoalIndex);
 	}
 }
 
