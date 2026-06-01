@@ -266,7 +266,7 @@ enum class LiftState : int8_t
 
 constexpr int8_t Const_MaxPathIndex = 8;
 constexpr int16_t Const_MaxWaypoints = 8192;
-constexpr int Const_NumWeapons = 24;
+constexpr int Const_NumWeapons = 25;
 constexpr int Const_MaxWeapons = 32;
 
 // weapon masks
@@ -562,6 +562,7 @@ public:
 	Vector m_prevOrigin{nullvec}; // origin some frames before
 	float m_prevVelocity{0.0f}; // velocity some frames before
 	float m_stuckTime{0.0f}; // how long bot has been stuck?
+	float m_stuckClearTimer{0.0f}; // continuous not-stuck timer
 	float m_stuckCooldownUntil{0.0f}; // cooldown timer
 	Vector m_lastStuckOrigin{nullvec}; // cooldown origin
 	Vector m_lastAvoidVel{nullvec}; // smoothed avoid velocity
@@ -1097,6 +1098,7 @@ public:
 	bool IsNodeReachableAnalyze(const Vector &src, const Vector &destination, const float range, const bool hull = true);
 	bool MustJump(const Vector src, const Vector destination);
 	void Think(void);
+	void UpdateAsyncCache(void);
 	void ShowWaypointMsg(void);
 	bool NodesValid(void);
 	void CreateBasic(void);
@@ -1199,10 +1201,13 @@ inline Vector GetBottomOrigin(edict_t *ent)
 	return bottomOrigin;
 }
 
-inline Vector GetPlayerHeadOrigin(edict_t *ent, float distance = 0.0f, int weaponType = 0, int difficulty = 0)
+inline Vector GetPlayerHeadOrigin(edict_t *ent, float distance = 0.0f, int weaponType = 0, int difficulty = 0, bool highRecoil = false)
 {
 	if (FNullEnt(ent))
 		return nullvec;
+
+	if (highRecoil)
+		return ent->v.origin; // Shift aim to chest/body origin under high recoil!
 
 	constexpr float dist = 2048.0f * 2048.0f;
 	constexpr float sprayDistance = 512.0f * 512.0f;

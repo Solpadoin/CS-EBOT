@@ -811,7 +811,7 @@ public:
 			return true;
 		}
 
-				T* newMemory = new(std::nothrow) T[size];
+				T* newMemory = new(std::nothrow) T[size]();
 				if (!newMemory)
 			return false;
 
