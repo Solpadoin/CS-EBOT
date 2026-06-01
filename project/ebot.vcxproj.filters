@@ -8,7 +8,6 @@
 	<ClCompile Include="..\source\interface.cpp" />
 	<ClCompile Include="..\source\navigate.cpp" />
 	<ClCompile Include="..\source\netmsg.cpp" />
-	<ClCompile Include="..\source\precomp.cpp" />
 	<ClCompile Include="..\source\support.cpp" />
 	<ClCompile Include="..\source\waypoint.cpp" />
 	<ClCompile Include="..\source\clib.cpp" />
@@ -44,6 +43,8 @@
 	  <Filter>SSM</Filter>
 	</ClCompile>
 	<ClCompile Include="..\source\combat.cpp" />
+	<ClCompile Include="..\source\bot_query_hook.cpp" />
+	<ClCompile Include="..\source\bot_query_hook_win32.cpp" />
   </ItemGroup>
   <ItemGroup>
 	<ClInclude Include="..\include\core.h" />
@@ -60,6 +61,7 @@
 	<ClInclude Include="..\include\sse_mathfun.h" />
 	<ClInclude Include="..\include\sse_mathfun_extension.h" />
 	<ClInclude Include="..\include\compress.h" />
+	<ClInclude Include="..\include\async_pathfinder.h" />
   </ItemGroup>
   <ItemGroup>
 	<ResourceCompile Include="..\include\ebot.rc" />

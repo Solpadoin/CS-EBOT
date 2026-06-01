@@ -315,6 +315,7 @@
 	<ClInclude Include="..\include\sse_mathfun.h" />
 	<ClInclude Include="..\include\sse_mathfun_extension.h" />
 	<ClInclude Include="..\include\bot_query_hook.h" />
+	<ClInclude Include="..\include\async_pathfinder.h" />
    </ItemGroup>
   <ItemGroup>
 	<ResourceCompile Include="..\include\ebot.rc" />
