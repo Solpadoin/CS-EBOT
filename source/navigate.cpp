@@ -23,6 +23,9 @@
 //
 
 #include "async_pathfinder.h"
+#ifdef PLATFORM_LINUX
+#include <unistd.h>
+#endif
 constexpr int16_t pMax = static_cast<int16_t>(Const_MaxPathIndex);
 
 ConVar ebot_zombies_as_path_cost("ebot_zombie_count_as_path_cost", "1");
@@ -1954,6 +1957,12 @@ PathJob* AsyncPathfinder::PopJob(void)
 
 void AsyncPathfinder::ThreadFunc(void* arg)
 {
+#if defined(_WIN32)
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#elif defined(PLATFORM_LINUX)
+	nice(19);
+#endif
+
 	AsyncPathfinder* self = static_cast<AsyncPathfinder*>(arg);
 	while (true)
 	{

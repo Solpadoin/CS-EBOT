@@ -29,6 +29,7 @@
 
 #ifdef PLATFORM_LINUX
 #include <cstdlib>
+#include <unistd.h>
 #endif
 
 ConVar ebot_analyze_distance("ebot_analyze_grid_distance", "40");
@@ -1998,6 +1999,12 @@ struct MatrixWorkerArgs
 
 void MatrixWorker(Waypoint* wpt, int16_t* distMatrix, tthread::atomic<int>& nextStartNode, int16_t num)
 {
+#if defined(_WIN32)
+	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_BELOW_NORMAL);
+#elif defined(PLATFORM_LINUX)
+	nice(19);
+#endif
+
 	constexpr int16_t INF = static_cast<int16_t>(32766);
 	constexpr int16_t pnum = static_cast<int16_t>(Const_MaxPathIndex);
 
@@ -2153,6 +2160,9 @@ void MatrixWorker(Waypoint* wpt, int16_t* distMatrix, tthread::atomic<int>& next
 
 			*(distMatrix + (s * num) + j) = static_cast<int16_t>(val);
 		}
+
+		// yield/sleep to prevent CPU starvation and allow the main game thread/process to run smoothly in local games
+		tthread::this_thread::sleep_for(tthread::chrono::milliseconds(1));
 	}
 
 	delete[] dist;
@@ -2195,8 +2205,10 @@ void CalculateMatrix(void* arg)
 	tthread::atomic<int> nextStartNode(0);
 
 	unsigned int numThreads = tthread::thread::hardware_concurrency();
-	if (numThreads > 4)
-		numThreads = 4;
+	if (numThreads > 1)
+		numThreads--; // leave at least one core free for the game engine!
+	if (numThreads > 3)
+		numThreads = 3; // cap at 3 threads to ensure responsiveness
 
 	if (numThreads > 1)
 		ServerPrint("FOUND %i THREADS FOR MATRIX CALCULATIONS", numThreads);
