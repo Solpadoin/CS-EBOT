@@ -220,10 +220,14 @@ thread::thread(void (*aFunction)(void *), void * aArg)
 
 	// Create the thread
 #if defined(_TTHREAD_WIN32_)
-	mHandle = (HANDLE) _beginthreadex(0, 0, wrapper_function, (void *) tw, 0, &mWin32ThreadID);
+	mHandle = (HANDLE) _beginthreadex(0, 256 * 1024, wrapper_function, (void *) tw, 0, &mWin32ThreadID);
 #elif defined(_TTHREAD_POSIX_)
-	if(pthread_create(&mHandle, NULL, wrapper_function, (void *) tw) != 0)
-	mHandle = 0;
+	pthread_attr_t attr;
+	pthread_attr_init(&attr);
+	pthread_attr_setstacksize(&attr, 256 * 1024);
+	if(pthread_create(&mHandle, &attr, wrapper_function, (void *) tw) != 0)
+		mHandle = 0;
+	pthread_attr_destroy(&attr);
 #endif
 
 	// Did we fail to create the thread?

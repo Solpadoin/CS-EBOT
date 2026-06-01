@@ -22,7 +22,7 @@
 // $Id:$
 //
 
-#include "../include/core.h"
+#include "async_pathfinder.h"
 constexpr int16_t pMax = static_cast<int16_t>(Const_MaxPathIndex);
 
 ConVar ebot_zombies_as_path_cost("ebot_zombie_count_as_path_cost", "1");
@@ -1202,9 +1202,10 @@ inline const float GF_CostHuman(const int16_t &index, const int16_t &parent, con
 	Path pathCache = g_waypoint->m_paths[parent];
 	if (parentFlags & WAYPOINT_ONLYONE)
 	{
-		for (const auto &client : g_clients)
+		for (int i = 0; i < 32; i++)
 		{
-			if (!(client.flags & CFLAG_USED) || !(client.flags & CFLAG_ALIVE) || team != client.team)
+			const auto &client = g_clientCache[i];
+			if (!client.active || !client.alive || team != client.team)
 				continue;
 
 			if ((client.origin - pathCache.origin).GetLengthSquared() < squaredi(static_cast<int>(pathCache.radius) + 64))
@@ -1218,12 +1219,13 @@ inline const float GF_CostHuman(const int16_t &index, const int16_t &parent, con
 	int zombieCountInArea = 0;
 	const float scanRadius = 1200.0f;
 
-	for (const auto &client : g_clients)
+	for (int i = 0; i < 32; i++)
 	{
-		if (!(client.flags & CFLAG_USED) || !(client.flags & CFLAG_ALIVE) || team == client.team)
+		const auto &client = g_clientCache[i];
+		if (!client.active || !client.alive || team == client.team)
 			continue;
 
-		distanceSq = (client.ent->v.origin - pathCache.origin).GetLengthSquared();
+		distanceSq = (client.origin - pathCache.origin).GetLengthSquared();
 		if (distanceSq < (scanRadius * scanRadius))
 		{
 			zombieCountInArea++;
@@ -1270,9 +1272,10 @@ inline const float GF_CostCareful(const int16_t &index, const int16_t &parent, c
 	if (parentFlags & WAYPOINT_ONLYONE)
 	{
 		Path pathCache = g_waypoint->m_paths[parent];
-		for (const auto &client : g_clients)
+		for (int i = 0; i < 32; i++)
 		{
-			if (!(client.flags & CFLAG_USED) || !(client.flags & CFLAG_ALIVE) || team != client.team)
+			const auto &client = g_clientCache[i];
+			if (!client.active || !client.alive || team != client.team)
 				continue;
 
 			if ((client.origin - pathCache.origin).GetLengthSquared() < squaredi(static_cast<int>(pathCache.radius) + 64))
@@ -1285,14 +1288,15 @@ inline const float GF_CostCareful(const int16_t &index, const int16_t &parent, c
 		Path pathCache = g_waypoint->m_paths[parent];
 		float zombieCostPenalty = 0.0f;
 
-		for (Bot *const &bot : g_botManager->m_bots)
+		for (int i = 0; i < 32; i++)
 		{
-			if (bot == nullptr || !bot->m_isAlive || bot->m_team != team)
+			const auto &bot = g_botCache[i];
+			if (!bot.active || !bot.alive || bot.team != team)
 				continue;
 
-			if (bot->m_isZombieBot && bot->m_personality != Personality::Careful)
+			if (bot.isZombie && bot.personality != Personality::Careful)
 			{
-				if ((bot->pev->origin - pathCache.origin).GetLengthSquared() < squaredf(400.0f))
+				if ((bot.origin - pathCache.origin).GetLengthSquared() < squaredf(400.0f))
 					zombieCostPenalty += 600.0f;
 			}
 		}
@@ -1300,14 +1304,16 @@ inline const float GF_CostCareful(const int16_t &index, const int16_t &parent, c
 		if (parentFlags & WAYPOINT_DJUMP)
 		{
 			int8_t countCache = 0;
-			for (const auto &client : g_clients)
+			for (int i = 0; i < 32; i++)
 			{
-				if (!(client.flags & CFLAG_USED) || !(client.flags & CFLAG_ALIVE) || client.team != team)
+				const auto &client = g_clientCache[i];
+				if (!client.active || !client.alive || client.team != team)
 					continue;
 
-				if ((client.origin - pathCache.origin).GetLengthSquared() < squaredi(static_cast<int>(pathCache.radius) + 512))
+				float distSq = (client.origin - pathCache.origin).GetLengthSquared();
+				if (distSq < squaredi(static_cast<int>(pathCache.radius) + 512))
 					countCache++;
-				else if (IsVisible(pathCache.origin, client.ent))
+				else if (distSq < squaredf(800.0f))
 					countCache++;
 			}
 
@@ -1347,9 +1353,10 @@ inline const float GF_CostNormal(const int16_t &index, const int16_t &parent, co
 	if (parentFlags & WAYPOINT_ONLYONE)
 	{
 		Path pathCache = g_waypoint->m_paths[parent];
-		for (const auto &client : g_clients)
+		for (int i = 0; i < 32; i++)
 		{
-			if (!(client.flags & CFLAG_USED) || !(client.flags & CFLAG_ALIVE) || team != client.team)
+			const auto &client = g_clientCache[i];
+			if (!client.active || !client.alive || team != client.team)
 				continue;
 
 			if ((client.origin - pathCache.origin).GetLengthSquared() < squaredi(static_cast<int>(pathCache.radius) + 64))
@@ -1363,14 +1370,16 @@ inline const float GF_CostNormal(const int16_t &index, const int16_t &parent, co
 		{
 			Path pathCache = g_waypoint->m_paths[parent];
 			int8_t countCache = 0;
-			for (const auto &client : g_clients)
+			for (int i = 0; i < 32; i++)
 			{
-				if (!(client.flags & CFLAG_USED) || !(client.flags & CFLAG_ALIVE) || client.team != team)
+				const auto &client = g_clientCache[i];
+				if (!client.active || !client.alive || client.team != team)
 					continue;
 
-				if ((client.origin - pathCache.origin).GetLengthSquared() < squaredi(static_cast<int>(pathCache.radius) + 512))
+				float distSq = (client.origin - pathCache.origin).GetLengthSquared();
+				if (distSq < squaredi(static_cast<int>(pathCache.radius) + 512))
 					countCache++;
-				else if (IsVisible(pathCache.origin, client.ent))
+				else if (distSq < squaredf(800.0f))
 					countCache++;
 			}
 
@@ -1410,9 +1419,10 @@ inline const float GF_CostRusher(const int16_t &index, const int16_t &parent, co
 	if (parentFlags & WAYPOINT_ONLYONE)
 	{
 		Path pathCache = g_waypoint->m_paths[parent];
-		for (const auto &client : g_clients)
+		for (int i = 0; i < 32; i++)
 		{
-			if (!(client.flags & CFLAG_USED) || !(client.flags & CFLAG_ALIVE) || team != client.team)
+			const auto &client = g_clientCache[i];
+			if (!client.active || !client.alive || team != client.team)
 				continue;
 
 			if ((client.origin - pathCache.origin).GetLengthSquared() < squaredi(static_cast<int>(pathCache.radius) + 64))
@@ -1440,6 +1450,545 @@ struct AStar
 CArray<AStar> waypoints{2};
 
 // this function finds a path from srcIndex to destIndex
+struct LocalHeapNode
+{
+	int16_t id;
+	float priority;
+};
+
+class LocalPriorityQueue
+{
+public:
+	CArray<LocalHeapNode> heapNode;
+	int16_t m_size{0};
+
+	bool Setup(int numWaypoints)
+	{
+		if (!heapNode.Resize(numWaypoints, true))
+			return false;
+		m_size = 0;
+		return true;
+	}
+
+	bool IsEmpty(void) const { return m_size < 1; }
+
+	void InsertLowest(const int16_t value, const float priority)
+	{
+		heapNode[m_size].priority = priority;
+		heapNode[m_size].id = value;
+
+		int16_t child;
+		int16_t parent;
+		LocalHeapNode temp;
+
+		child = ++m_size - 1;
+		while (child > 0)
+		{
+			parent = (child - 1) / 2;
+			if (heapNode[parent].priority < heapNode[child].priority)
+				break;
+
+			temp = heapNode[child];
+			heapNode[child] = heapNode[parent];
+			heapNode[parent] = temp;
+			child = parent;
+		}
+	}
+
+	int16_t RemoveLowest(void)
+	{
+		const int16_t retID = heapNode[0].id;
+
+		m_size--;
+		heapNode[0] = heapNode[m_size];
+
+		int16_t rightChild;
+		int16_t parent = 0;
+		int16_t child = (2 * parent) + 1;
+		LocalHeapNode ref = heapNode[parent];
+		while (child < m_size)
+		{
+			rightChild = child + 1;
+			if (rightChild < m_size)
+			{
+				if (heapNode[rightChild].priority < heapNode[child].priority)
+					child = rightChild;
+			}
+
+			if (ref.priority < heapNode[child].priority)
+				break;
+
+			heapNode[parent] = heapNode[child];
+			parent = child;
+			child = (2 * parent) + 1;
+		}
+
+		heapNode[parent] = ref;
+		return retID;
+	}
+};
+
+bool RunAsyncAStar(PathJob* job, CArray<AStar>& waypoints, LocalPriorityQueue& openList, CArray<int16_t>& pathResult)
+{
+	int16_t srcIndex = job->srcIndex;
+	int16_t destIndex = job->destIndex;
+
+	if (srcIndex == destIndex)
+		return false;
+
+	if (!openList.Setup(g_numWaypoints))
+		return false;
+
+	const float (*hcalc)(const int16_t &, const int16_t &) = nullptr;
+	const float (*gcalc)(const int16_t &, const int16_t &, const uint32_t &, const int8_t &, const float &, const bool &) = nullptr;
+
+	if (ebot_zombies_as_path_cost.GetBool() && !job->isZombie)
+		gcalc = GF_CostHuman;
+	else if (job->personality == Personality::Careful)
+		gcalc = GF_CostCareful;
+	else if (job->personality == Personality::Rusher)
+		gcalc = GF_CostRusher;
+	else
+		gcalc = GF_CostNormal;
+
+	if (!gcalc)
+		return false;
+
+	if (g_isMatrixReady)
+		hcalc = HF_Matrix;
+	else
+		hcalc = HF_Distance;
+
+	if (!hcalc)
+		return false;
+
+	Waypoint *gP = g_waypoint;
+	if (!gP)
+		return false;
+
+	int seed = job->botIndex + 42;
+	float min = ebot_pathfinder_seed_min.GetFloat();
+	float max = ebot_pathfinder_seed_max.GetFloat();
+
+	int16_t i;
+	Path currPath;
+
+	for (i = 0; i < g_numWaypoints; i++)
+	{
+		waypoints[i].g = 0.0f;
+		waypoints[i].f = 0.0f;
+		waypoints[i].parent = -1;
+		waypoints[i].is_closed = false;
+	}
+
+	AStar &srcWaypoint = waypoints[srcIndex];
+	srcWaypoint.g = 0.0f;
+	srcWaypoint.f = srcWaypoint.g + hcalc(srcIndex, destIndex);
+
+	openList.InsertLowest(srcIndex, srcWaypoint.f);
+	while (!openList.IsEmpty())
+	{
+		if (job->canceled)
+			return false;
+
+		int16_t currentIndex = openList.RemoveLowest();
+		if (currentIndex == destIndex)
+		{
+			int16_t tempIndex = currentIndex;
+			while (IsValidWaypoint(tempIndex))
+			{
+				pathResult.Push(tempIndex);
+				tempIndex = waypoints[tempIndex].parent;
+			}
+			pathResult.Reverse();
+			return true;
+		}
+
+		AStar *currWaypoint = &waypoints[currentIndex];
+		if (currWaypoint->is_closed)
+			continue;
+
+		currWaypoint->is_closed = true;
+
+		currPath = gP->m_paths[currentIndex];
+		for (i = 0; i < pMax; i++)
+		{
+			int16_t self = currPath.index[i];
+			if (!IsValidWaypoint(self))
+				continue;
+
+			if (!job->isHumanCampPath && self == job->lastDeclineWaypoint)
+				continue;
+
+			if (currPath.connectionFlags[i] & PATHFLAG_VISIBLE)
+			{
+				if (!g_waypointCache[currentIndex].visibleConnection[i])
+					continue;
+			}
+
+			uint32_t flags = gP->m_paths[self].flags;
+			if (flags)
+			{
+				if (flags & WAYPOINT_FALLCHECK)
+				{
+					if (!g_waypointCache[self].fallCheckPassed)
+						continue;
+				}
+
+				if (flags & WAYPOINT_SPECIFICGRAVITY)
+				{
+					if ((job->gravity * engine->GetGravity()) > gP->m_paths[self].gravity)
+						continue;
+				}
+
+				if (!job->isHumanCampPath && (flags & WAYPOINT_ONLYONE))
+				{
+					bool skip = false;
+					for (int b = 0; b < 32; b++)
+					{
+						const auto &bot = g_botCache[b];
+						if (bot.active && bot.alive && b != job->botIndex)
+						{
+							if ((bot.origin - gP->m_paths[self].origin).GetLengthSquared() < squaredf(64.0f))
+							{
+								skip = true;
+								break;
+							}
+						}
+					}
+					if (skip)
+						continue;
+				}
+			}
+
+			float g = currWaypoint->g + ((gcalc(currentIndex, self, flags, job->team, job->gravity, job->isZombie) * crandomfloatfast(seed, min, max)));
+			float f = g + hcalc(self, destIndex);
+
+			AStar *childWaypoint = &waypoints[self];
+			if (!childWaypoint->is_closed && (childWaypoint->f == 0.0f || childWaypoint->f > f))
+			{
+				childWaypoint->parent = currentIndex;
+				childWaypoint->g = g;
+				childWaypoint->f = f;
+				openList.InsertLowest(self, f);
+			}
+		}
+	}
+
+	return false;
+}
+
+bool RunAsyncShortestPath(PathJob* job, CArray<AStar>& waypoints, LocalPriorityQueue& openList, CArray<int16_t>& pathResult)
+{
+	int16_t srcIndex = job->srcIndex;
+	int16_t destIndex = job->destIndex;
+
+	if (srcIndex == destIndex)
+		return false;
+
+	if (!openList.Setup(g_numWaypoints))
+		return false;
+
+	const float (*hcalc)(const int16_t &, const int16_t &) = nullptr;
+
+	if (g_isMatrixReady)
+		hcalc = HF_Matrix;
+	else
+		hcalc = HF_DistanceSquared;
+
+	if (!hcalc)
+		return false;
+
+	Waypoint *gP = g_waypoint;
+	if (!gP)
+		return false;
+
+	int16_t i;
+	for (i = 0; i < g_numWaypoints; i++)
+	{
+		waypoints[i].g = 0.0f;
+		waypoints[i].f = 0.0f;
+		waypoints[i].parent = -1;
+		waypoints[i].is_closed = false;
+	}
+
+	AStar &srcWaypoint = waypoints[srcIndex];
+	srcWaypoint.f = hcalc(srcIndex, destIndex);
+
+	openList.InsertLowest(srcIndex, srcWaypoint.f);
+	while (!openList.IsEmpty())
+	{
+		if (job->canceled)
+			return false;
+
+		int16_t currentIndex = openList.RemoveLowest();
+		if (currentIndex == destIndex)
+		{
+			int16_t tempIndex = currentIndex;
+			while (IsValidWaypoint(tempIndex))
+			{
+				pathResult.Push(tempIndex);
+				tempIndex = waypoints[tempIndex].parent;
+			}
+			pathResult.Reverse();
+			return true;
+		}
+
+		AStar *currWaypoint = &waypoints[currentIndex];
+		if (currWaypoint->is_closed)
+			continue;
+
+		currWaypoint->is_closed = true;
+
+		Path currPath = gP->m_paths[currentIndex];
+		for (i = 0; i < pMax; i++)
+		{
+			int16_t self = currPath.index[i];
+			if (!IsValidWaypoint(self))
+				continue;
+
+			if (!job->isHumanCampPath && self == job->lastDeclineWaypoint)
+				continue;
+
+			if (currPath.connectionFlags[i] & PATHFLAG_VISIBLE)
+			{
+				if (!g_waypointCache[currentIndex].visibleConnection[i])
+					continue;
+			}
+
+			uint32_t flags = gP->m_paths[self].flags;
+			if (flags)
+			{
+				if (flags & WAYPOINT_FALLCHECK)
+				{
+					if (!g_waypointCache[self].fallCheckPassed)
+						continue;
+				}
+
+				if (flags & WAYPOINT_SPECIFICGRAVITY)
+				{
+					if ((job->gravity * engine->GetGravity()) > gP->m_paths[self].gravity)
+						continue;
+				}
+
+				if (!job->isHumanCampPath && (flags & WAYPOINT_ONLYONE))
+				{
+					bool skip = false;
+					for (int b = 0; b < 32; b++)
+					{
+						const auto &bot = g_botCache[b];
+						if (bot.active && bot.alive && b != job->botIndex)
+						{
+							if ((bot.origin - gP->m_paths[self].origin).GetLengthSquared() < squaredf(64.0f))
+							{
+								skip = true;
+								break;
+							}
+						}
+					}
+					if (skip)
+						continue;
+				}
+			}
+
+			float g = currWaypoint->g + hcalc(self, currentIndex);
+			float f = g + hcalc(self, destIndex);
+
+			AStar *childWaypoint = &waypoints[self];
+			if (!childWaypoint->is_closed && (childWaypoint->f == 0.0f || childWaypoint->f > f))
+			{
+				childWaypoint->parent = currentIndex;
+				childWaypoint->g = g;
+				childWaypoint->f = f;
+				openList.InsertLowest(self, f);
+			}
+		}
+	}
+
+	return false;
+}
+
+AsyncPathfinder g_asyncPathfinder;
+
+AsyncPathfinder::AsyncPathfinder(void) : m_thread(nullptr), m_running(false)
+{
+	for (int i = 0; i < 33; ++i)
+		m_activeJobs[i] = nullptr;
+}
+
+AsyncPathfinder::~AsyncPathfinder(void)
+{
+	Stop();
+}
+
+void AsyncPathfinder::Start(void)
+{
+	tthread::lock_guard<tthread::mutex> guard(m_mutex);
+	if (m_running)
+		return;
+
+	m_running = true;
+	m_thread = new tthread::thread(ThreadFunc, this);
+}
+
+void AsyncPathfinder::Stop(void)
+{
+	{
+		tthread::lock_guard<tthread::mutex> guard(m_mutex);
+		if (!m_running)
+			return;
+
+		m_running = false;
+		m_cv.notify_all();
+	}
+
+	if (m_thread)
+	{
+		m_thread->join();
+		delete m_thread;
+		m_thread = nullptr;
+	}
+
+	tthread::lock_guard<tthread::mutex> guard(m_mutex);
+	for (int i = 0; i < m_queue.Size(); ++i)
+	{
+		delete m_queue[i];
+	}
+	m_queue.Destroy();
+
+	for (int i = 0; i < 33; ++i)
+	{
+		if (m_activeJobs[i])
+		{
+			delete m_activeJobs[i];
+			m_activeJobs[i] = nullptr;
+		}
+	}
+}
+
+void AsyncPathfinder::RequestPath(int botIndex, int16_t srcIndex, int16_t destIndex, bool isZombie, int personality, float gravity, int team, bool isHumanCampPath, int16_t lastDeclineWaypoint, bool forceShortest)
+{
+	tthread::lock_guard<tthread::mutex> guard(m_mutex);
+	if (!m_running)
+		return;
+
+	PathJob* active = m_activeJobs[botIndex];
+	if (active)
+	{
+		if (active->srcIndex == srcIndex && active->destIndex == destIndex && active->forceShortest == forceShortest && !active->canceled)
+			return;
+
+		active->canceled = true;
+		for (int i = 0; i < m_queue.Size(); ++i)
+		{
+			if (m_queue[i] == active)
+			{
+				m_queue.RemoveAt(i);
+				delete active;
+				break;
+			}
+		}
+
+		m_activeJobs[botIndex] = nullptr;
+	}
+
+	PathJob* job = new PathJob();
+	job->botIndex = botIndex;
+	job->srcIndex = srcIndex;
+	job->destIndex = destIndex;
+	job->isZombie = isZombie;
+	job->personality = personality;
+	job->gravity = gravity;
+	job->team = team;
+	job->isHumanCampPath = isHumanCampPath;
+	job->lastDeclineWaypoint = lastDeclineWaypoint;
+	job->forceShortest = forceShortest;
+	job->completed = false;
+	job->canceled = false;
+
+	m_activeJobs[botIndex] = job;
+	m_queue.Push(job);
+	m_cv.notify_one();
+}
+
+bool AsyncPathfinder::IsPathReady(int botIndex)
+{
+	tthread::lock_guard<tthread::mutex> guard(m_mutex);
+	PathJob* job = m_activeJobs[botIndex];
+	if (job && job->completed && !job->canceled)
+		return true;
+
+	return false;
+}
+
+CArray<int16_t> AsyncPathfinder::GetPath(int botIndex)
+{
+	tthread::lock_guard<tthread::mutex> guard(m_mutex);
+	PathJob* job = m_activeJobs[botIndex];
+	CArray<int16_t> result;
+	if (job)
+	{
+		if (job->completed && !job->canceled)
+			result = std::move(job->pathResult);
+
+		delete job;
+		m_activeJobs[botIndex] = nullptr;
+	}
+
+	return result;
+}
+
+PathJob* AsyncPathfinder::PopJob(void)
+{
+	tthread::lock_guard<tthread::mutex> guard(m_mutex);
+	while (m_running && m_queue.IsEmpty())
+		m_cv.wait(m_mutex);
+
+	if (!m_running)
+		return nullptr;
+
+	PathJob* job = m_queue[0];
+	m_queue.RemoveAt(0);
+	return job;
+}
+
+void AsyncPathfinder::ThreadFunc(void* arg)
+{
+	AsyncPathfinder* self = static_cast<AsyncPathfinder*>(arg);
+	while (true)
+	{
+		PathJob* job = self->PopJob();
+		if (!job)
+			break;
+
+		if (job->canceled)
+		{
+			delete job;
+			continue;
+		}
+
+		CArray<AStar> waypoints(g_numWaypoints);
+		LocalPriorityQueue openList;
+
+		bool success = false;
+		if (job->forceShortest || ebot_force_shortest_path.GetBool() || g_numWaypoints > 2048)
+			success = RunAsyncShortestPath(job, waypoints, openList, job->pathResult);
+		else
+		{
+			success = RunAsyncAStar(job, waypoints, openList, job->pathResult);
+			if (!success && !job->canceled)
+				success = RunAsyncShortestPath(job, waypoints, openList, job->pathResult);
+		}
+
+		tthread::lock_guard<tthread::mutex> guard(self->m_mutex);
+		if (!job->canceled)
+			job->completed = true;
+		else
+			delete job;
+	}
+}
+
+// this function finds a path from srcIndex to destIndex
 void Bot::FindPath(int16_t &srcIndex, int16_t &destIndex)
 {
 	if (!IsValidWaypoint(srcIndex))
@@ -1454,260 +2003,35 @@ void Bot::FindPath(int16_t &srcIndex, int16_t &destIndex)
 		return;
 	}
 
-	const bool isHumanCampPath = !m_isZombieBot && (destIndex == m_zhCampPointIndex || destIndex == m_myMeshWaypoint);
-
-	if (ebot_force_shortest_path.GetBool() || g_numWaypoints > 2048)
-	{
-		FindShortestPath(srcIndex, destIndex);
-		return;
-	}
-
 	if (srcIndex == destIndex)
 		return;
 
-	if (waypoints.NotAllocated())
+	const bool isHumanCampPath = !m_isZombieBot && (destIndex == m_zhCampPointIndex || destIndex == m_myMeshWaypoint);
+
+	if (g_asyncPathfinder.IsPathReady(m_index))
 	{
-		waypoints.Resize(g_numWaypoints, true);
-		return;
-	}
-
-	if (waypoints.Capacity() != g_numWaypoints)
-	{
-		waypoints.Resize(g_numWaypoints, true);
-		return;
-	}
-
-	PriorityQueue openList;
-	if (!openList.Setup())
-		return;
-
-	const float (*hcalc)(const int16_t &, const int16_t &) = nullptr;
-	const float (*gcalc)(const int16_t &, const int16_t &, const uint32_t &, const int8_t &, const float &, const bool &) = nullptr;
-
-	if (ebot_zombies_as_path_cost.GetBool() && !m_isZombieBot)
-		gcalc = GF_CostHuman;
-	else if (m_personality == Personality::Careful)
-		gcalc = GF_CostCareful;
-	else if (m_personality == Personality::Rusher)
-		gcalc = GF_CostRusher;
-	else
-		gcalc = GF_CostNormal;
-
-	if (!gcalc)
-		return;
-
-	if (g_isMatrixReady)
-		hcalc = HF_Matrix;
-	else
-		hcalc = HF_Distance;
-
-	if (!hcalc)
-		return;
-
-	Waypoint *gP = g_waypoint;
-	if (!gP)
-		return;
-
-	int seed = m_index + m_numSpawns + m_currentWeapon;
-	float min = ebot_pathfinder_seed_min.GetFloat();
-	float max = ebot_pathfinder_seed_max.GetFloat();
-
-	int16_t i;
-	Path currPath;
-
-	if (m_isStuck)
-		seed += static_cast<int>(engine->GetTime() * 0.1f);
-
-	for (i = 0; i < g_numWaypoints; i++)
-	{
-		waypoints[i].g = 0.0f;
-		waypoints[i].f = 0.0f;
-		waypoints[i].parent = -1;
-		waypoints[i].is_closed = false;
-	}
-
-	// put start waypoint into open list
-	AStar &srcWaypoint = waypoints[srcIndex];
-	srcWaypoint.g = 0.0f;
-	srcWaypoint.f = srcWaypoint.g + hcalc(srcIndex, destIndex);
-
-	// loop cache
-	AStar *currWaypoint;
-	AStar *childWaypoint;
-	int16_t currentIndex, self;
-	uint32_t flags;
-	float g, f;
-
-	openList.InsertLowest(srcIndex, srcWaypoint.f);
-	while (!openList.IsEmpty())
-	{
-		currentIndex = openList.RemoveLowest();
-		if (currentIndex == destIndex)
+		CArray<int16_t> path = g_asyncPathfinder.GetPath(m_index);
+		if (!path.IsEmpty())
 		{
-			int16_t pathLength = 0;
-			int16_t tempIndex = currentIndex;
-			while (IsValidWaypoint(tempIndex))
+			if (m_navNode.Init(path.Size()))
 			{
-				pathLength++;
-				tempIndex = waypoints[tempIndex].parent;
-			}
+				for (int i = 0; i < path.Size(); ++i)
+					m_navNode.Add(path[i]);
 
-			if (!m_navNode.Init(pathLength))
-				m_navNode.Clear();
+				if (m_navNode.HasNext() && (g_waypoint->GetPath(m_navNode.Next())->origin - pev->origin).GetLengthSquared() < (g_waypoint->GetPath(m_navNode.Next())->origin - g_waypoint->GetPath(m_navNode.First())->origin).GetLengthSquared())
+					m_navNode.Shift();
 
-			do
-			{
-				if (!m_navNode.Add(currentIndex))
-					break;
-
-				currentIndex = waypoints[currentIndex].parent;
-			} while (IsValidWaypoint(currentIndex));
-
-			m_navNode.Reverse();
-			if (m_navNode.HasNext() && (gP->GetPath(m_navNode.Next())->origin - pev->origin) .GetLengthSquared() < (gP->GetPath(m_navNode.Next())->origin - gP->GetPath(m_navNode.First())->origin).GetLengthSquared())
-				m_navNode.Shift();
-
-			if (!m_navNode.IsEmpty())
-				 ChangeWptIndex(m_navNode.First());
-
-			return;
-		}
-
-		currWaypoint = &waypoints[currentIndex];
-		if (currWaypoint->is_closed)
-			continue;
-
-		currWaypoint->is_closed = true;
-
-		currPath = gP->m_paths[currentIndex];
-		for (i = 0; i < pMax; i++)
-		{
-			self = currPath.index[i];
-			if (!IsValidWaypoint(self))
-				continue;
-
-			if (!isHumanCampPath && self == m_lastDeclineWaypoint)
-				continue;
-
-			if (currPath.connectionFlags[i] & PATHFLAG_VISIBLE)
-			{
-				TraceResult tr;
-				TraceLine(currPath.origin, gP->m_paths[self].origin, TraceIgnore::Nothing, GetEntity(), &tr);
-				if (tr.flFraction < 1.0f)
-					continue;
-			}
-
-			flags = gP->m_paths[self].flags;
-			if (flags)
-			{
-				if (flags & WAYPOINT_FALLCHECK)
-				{
-					TraceResult tr;
-					const Vector origin = gP->m_paths[self].origin;
-					TraceLine(origin, origin - Vector(0.0f, 0.0f, 60.0f), TraceIgnore::Nothing, GetEntity(), &tr);
-					if (tr.flFraction >= 1.0f)
-						continue;
-				}
-
-				if (flags & WAYPOINT_SPECIFICGRAVITY)
-				{
-					if ((pev->gravity * engine->GetGravity()) > gP->m_paths[self].gravity)
-						continue;
-				}
-
-				if (!isHumanCampPath && (flags & WAYPOINT_ONLYONE))
-				{
-					bool skip = false;
-					for (Bot *const &bot : g_botManager->m_bots)
-					{
-						if (skip)
-							break;
-
-						if (bot && bot->m_isAlive && bot->GetEntity() != GetEntity())
-						{
-							int16_t j;
-							for (j = 0; j < bot->m_navNode.Length(); j++)
-							{
-								if (bot->m_navNode.Get(j) == self)
-								{
-									skip = true;
-									break;
-								}
-							}
-						}
-					}
-
-					if (skip)
-						continue;
-				}
-			}
-
-			g = currWaypoint->g + ((gcalc(currentIndex, self, flags, m_team, pev->gravity, m_isZombieBot) * crandomfloatfast(seed, min, max)));
-			f = g + hcalc(self, destIndex);
-
-			childWaypoint = &waypoints[self];
-			if (!childWaypoint->is_closed && (childWaypoint->f == 0.0f || childWaypoint->f > f))
-			{
-				childWaypoint->parent = currentIndex;
-				childWaypoint->g = g;
-				childWaypoint->f = f;
-				openList.InsertLowest(self, f);
-			}
-		}
-	}
-
-	// roam around poorly :(
-	if (m_navNode.IsEmpty())
-	{
-		if (isHumanCampPath)
-		{
-			FindShortestPath(srcIndex, destIndex);
-			if (!m_navNode.IsEmpty())
-				return;
-
-			float bestDistance = 999999999.0f;
-			int16_t bestCamp = -1;
-			for (i = 0; i < g_waypoint->m_zmHmPoints.Size(); i++)
-			{
-				const int16_t camp = g_waypoint->m_zmHmPoints.Get(i);
-				if (!IsValidWaypoint(camp) || camp == destIndex)
-					continue;
-
-				const float distance = GetWaypointDistance(srcIndex, camp);
-				if (distance >= 32766.0f || distance >= bestDistance)
-					continue;
-
-				bestCamp = camp;
-				bestDistance = distance;
-			}
-
-			if (IsValidWaypoint(bestCamp))
-			{
-				m_zhCampPointIndex = bestCamp;
-				m_myMeshWaypoint = -1;
-				m_currentGoalIndex = bestCamp;
-				FindShortestPath(srcIndex, m_zhCampPointIndex);
 				if (!m_navNode.IsEmpty())
-					return;
+					ChangeWptIndex(m_navNode.First());
 			}
 		}
+		else
+			m_navNode.Clear();
 
-		CArray<int16_t> PossiblePath;
-		for (i = 0; i < g_numWaypoints; i++)
-		{
-			if (waypoints[i].is_closed)
-				PossiblePath.Push(i);
-		}
-
-		if (!PossiblePath.IsEmpty())
-		{
-			int16_t index = PossiblePath.Random();
-			FindShortestPath(srcIndex, index);
-			return;
-		}
-
-		FindShortestPath(srcIndex, destIndex);
+		return;
 	}
+
+	g_asyncPathfinder.RequestPath(m_index, srcIndex, destIndex, m_isZombieBot, m_personality, pev->gravity, m_team, isHumanCampPath, m_lastDeclineWaypoint, false);
 }
 
 void Bot::FindShortestPath(int16_t &srcIndex, int16_t &destIndex)
@@ -1718,176 +2042,35 @@ void Bot::FindShortestPath(int16_t &srcIndex, int16_t &destIndex)
 		return;
 	}
 
-	const bool isHumanCampPath = !m_isZombieBot && (destIndex == m_zhCampPointIndex || destIndex == m_myMeshWaypoint);
-
 	if (srcIndex == destIndex)
 		return;
 
-	if (waypoints.NotAllocated())
+	const bool isHumanCampPath = !m_isZombieBot && (destIndex == m_zhCampPointIndex || destIndex == m_myMeshWaypoint);
+
+	if (g_asyncPathfinder.IsPathReady(m_index))
 	{
-		waypoints.Resize(g_numWaypoints, true);
-		return;
-	}
-
-	if (waypoints.Capacity() != g_numWaypoints)
-	{
-		waypoints.Resize(g_numWaypoints, true);
-		return;
-	}
-
-	PriorityQueue openList;
-	if (!openList.Setup())
-		return;
-
-	const float (*hcalc)(const int16_t &, const int16_t &) = nullptr;
-
-	if (g_isMatrixReady)
-		hcalc = HF_Matrix;
-	else
-		hcalc = HF_DistanceSquared;
-
-	if (!hcalc)
-		return;
-
-	Waypoint *gP = g_waypoint;
-	if (!gP)
-		return;
-
-	int16_t i;
-	for (i = 0; i < g_numWaypoints; i++)
-	{
-		waypoints[i].g = 0.0f;
-		waypoints[i].f = 0.0f;
-		waypoints[i].parent = -1;
-		waypoints[i].is_closed = false;
-	}
-
-	AStar &srcWaypoint = waypoints[srcIndex];
-	srcWaypoint.f = hcalc(srcIndex, destIndex);
-
-	// loop cache
-	AStar *currWaypoint;
-	AStar *childWaypoint;
-	int16_t currentIndex, self;
-	uint32_t flags;
-	Path currPath;
-	float g, f;
-
-	openList.InsertLowest(srcIndex, srcWaypoint.f);
-	while (!openList.IsEmpty())
-	{
-		currentIndex = openList.RemoveLowest();
-		if (currentIndex == destIndex)
+		CArray<int16_t> path = g_asyncPathfinder.GetPath(m_index);
+		if (!path.IsEmpty())
 		{
-			int16_t pathLength = 0;
-			int16_t tempIndex = currentIndex;
-			while (IsValidWaypoint(tempIndex))
+			if (m_navNode.Init(path.Size()))
 			{
-				pathLength++;
-				tempIndex = waypoints[tempIndex].parent;
-			}
+				for (int i = 0; i < path.Size(); ++i)
+					m_navNode.Add(path[i]);
 
-			if (!m_navNode.Init(pathLength))
-				m_navNode.Clear();
+				if (m_navNode.HasNext() && (g_waypoint->GetPath(m_navNode.Next())->origin - pev->origin).GetLengthSquared() < (g_waypoint->GetPath(m_navNode.Next())->origin - g_waypoint->GetPath(m_navNode.First())->origin).GetLengthSquared())
+					m_navNode.Shift();
 
-			do
-			{
-				if (!m_navNode.Add(currentIndex))
-					break;
-
-				currentIndex = waypoints[currentIndex].parent;
-			} while (IsValidWaypoint(currentIndex));
-
-			m_navNode.Reverse();
-			if (m_navNode.HasNext() && (gP->GetPath(m_navNode.Next())->origin - pev->origin) .GetLengthSquared() < (gP->GetPath(m_navNode.Next())->origin - gP->GetPath(m_navNode.First())->origin).GetLengthSquared())
-				m_navNode.Shift();
-
-			if (!m_navNode.IsEmpty())
-				 ChangeWptIndex(m_navNode.First());
-
-			return;
-		}
-
-		currWaypoint = &waypoints[currentIndex];
-		if (currWaypoint->is_closed)
-			continue;
-
-		currWaypoint->is_closed = true;
-		currPath = gP->m_paths[currentIndex];
-		for (i = 0; i < pMax; i++)
-		{
-			self = currPath.index[i];
-			if (!IsValidWaypoint(self))
-				continue;
-
-			if (!isHumanCampPath && self == m_lastDeclineWaypoint)
-				continue;
-
-			if (currPath.connectionFlags[i] & PATHFLAG_VISIBLE)
-			{
-				TraceResult tr;
-				TraceLine(currPath.origin, gP->m_paths[self].origin, TraceIgnore::Nothing, GetEntity(), &tr);
-				if (tr.flFraction < 1.0f)
-					continue;
-			}
-
-			flags = gP->m_paths[self].flags;
-			if (flags)
-			{
-				if (flags & WAYPOINT_FALLCHECK)
-				{
-					TraceResult tr;
-					const Vector origin = gP->m_paths[self].origin;
-					TraceLine(origin, origin - Vector(0.0f, 0.0f, 60.0f), TraceIgnore::Nothing, GetEntity(), &tr);
-					if (tr.flFraction >= 1.0f)
-						continue;
-				}
-
-				if (flags & WAYPOINT_SPECIFICGRAVITY)
-				{
-					if ((pev->gravity * engine->GetGravity()) > gP->m_paths[self].gravity)
-						continue;
-				}
-
-				if (!isHumanCampPath && (flags & WAYPOINT_ONLYONE))
-				{
-					bool skip = false;
-					for (Bot *const &bot : g_botManager->m_bots)
-					{
-						if (skip)
-							break;
-
-						if (bot && bot->m_isAlive && bot->GetEntity() != GetEntity())
-						{
-							int16_t j;
-							for (j = 0; j < bot->m_navNode.Length(); j++)
-							{
-								if (bot->m_navNode.Get(j) == self)
-								{
-									skip = true;
-									break;
-								}
-							}
-						}
-					}
-
-					if (skip)
-						continue;
-				}
-			}
-
-			g = currWaypoint->g + hcalc(self, currentIndex);
-			f = g + hcalc(self, destIndex);
-			childWaypoint = &waypoints[self];
-			if (!childWaypoint->is_closed && (childWaypoint->f == 0.0f || childWaypoint->f > f))
-			{
-				childWaypoint->parent = currentIndex;
-				childWaypoint->g = g;
-				childWaypoint->f = f;
-				openList.InsertLowest(self, f);
+				if (!m_navNode.IsEmpty())
+					ChangeWptIndex(m_navNode.First());
 			}
 		}
+		else
+			m_navNode.Clear();
+
+		return;
 	}
+
+	g_asyncPathfinder.RequestPath(m_index, srcIndex, destIndex, m_isZombieBot, m_personality, pev->gravity, m_team, isHumanCampPath, m_lastDeclineWaypoint, true);
 }
 
 void Bot::FindEscapePath(int16_t &srcIndex, const Vector &dangerOrigin)
@@ -2298,12 +2481,8 @@ int16_t Bot::FindWaypoint(void)
 
 		if (!foundOnPath)
 		{
-			if ((!m_isStuck || m_stuckTime < 1.0f) 
-				&& g_clients[m_index].wp != m_lastDeclineWaypoint 
-				&& g_waypoint->Reachable(GetEntity(), g_clients[m_index].wp))
-			{
+			if ((!m_isStuck || m_stuckTime < 1.0f)  && g_clients[m_index].wp != m_lastDeclineWaypoint && g_waypoint->Reachable(GetEntity(), g_clients[m_index].wp))
 				index = g_clients[m_index].wp;
-			}
 			else
 			{
 				index = g_waypoint->FindNearestToEnt(pev->origin, 2048.0f, GetEntity());
@@ -2328,6 +2507,7 @@ int16_t Bot::FindWaypoint(void)
 							minDistance = distance;
 						}
 					}
+
 					index = bestIdx;
 				}
 
@@ -2348,6 +2528,7 @@ int16_t Bot::FindWaypoint(void)
 							minDistance = distance;
 						}
 					}
+
 					index = bestIdx;
 				}
 			}
@@ -2376,6 +2557,7 @@ void Bot::ResetStuck(void)
 	m_stuckTime = 0.0f;
 	m_isStuck = false;
 	m_wasStuck = false;
+	m_stuckClearTimer = 0.0f;
 	m_checkFall = false;
 	for (Vector &fall : m_checkFallPoint)
 		fall = nullvec;
@@ -2394,6 +2576,7 @@ void Bot::IgnoreCollisionShortly(void)
 
 	m_isStuck = false;
 	m_stuckTime = 0.0f;
+	m_stuckClearTimer = 0.0f;
 }
 
 bool Bot::CheckWaypoint(void)
@@ -2459,6 +2642,8 @@ bool Bot::CheckWaypoint(void)
 
 void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 {
+	const bool wasStuckBeforeFrame = m_isStuck || (m_stuckTime > 0.0f);
+
 	if (m_waypoint.flags & WAYPOINT_FALLCHECK)
 	{
 		ResetStuck();
@@ -2880,6 +3065,8 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 			float stuckThresholdMul = inCooldown ? 0.7f : 1.0f;
 			const float stuckThreshold = (isDucking ? squaredf(0.8f) : squaredf(1.5f)) * stuckThresholdMul;
 
+			bool detectedStuckThisFrame = false;
+
 			if (FNullEnt(m_avoid) && !makingProgress && m_movedDistance < stuckThreshold && (m_prevSpeed > 20.0f || m_prevVelocity < squaredf(m_moveSpeed * 0.5f)))
 			{
 				bool knockbackSafe = false;
@@ -2892,11 +3079,7 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 
 				if (!knockbackSafe)
 				{
-					m_prevTime = time2;
-					m_isStuck = true;
-
-					if (Math::FltZero(m_firstCollideTime))
-						m_firstCollideTime = time2 + 0.2f;
+					detectedStuckThisFrame = true;
 				}
 			}
 			else if (realProgress)
@@ -2909,10 +3092,43 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 					if (Math::FltZero(m_firstCollideTime))
 						m_firstCollideTime = time2 + 0.2f;
 					else if (m_firstCollideTime < time2)
-						m_isStuck = true;
+						detectedStuckThisFrame = true;
 				}
 				else
 					m_firstCollideTime = 0.0f;
+			}
+
+			if (detectedStuckThisFrame)
+			{
+				m_prevTime = time2;
+				m_isStuck = true;
+				m_stuckClearTimer = 0.0f;
+
+				if (Math::FltZero(m_firstCollideTime))
+					m_firstCollideTime = time2 + 0.2f;
+			}
+			else
+			{
+				if (wasStuckBeforeFrame)
+				{
+					if (realProgress)
+					{
+						m_stuckClearTimer += sampleInterval;
+						if (m_stuckClearTimer >= 3.0f)
+						{
+							ResetStuck();
+						}
+						else
+						{
+							m_isStuck = true; // Keep stuck recovery active
+						}
+					}
+					else
+					{
+						m_stuckClearTimer = 0.0f;
+						m_isStuck = true; // Keep stuck recovery active
+					}
+				}
 			}
 		}
 	}

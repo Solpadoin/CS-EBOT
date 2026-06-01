@@ -741,7 +741,7 @@ void Bot::BaseUpdate(void)
 			{
 				if (m_aimingAtEnemy && m_hasEnemiesNear && !FNullEnt(m_nearestEnemy))
 				{
-					m_enemyOrigin = GetPlayerHeadOrigin(m_nearestEnemy, (pev->origin - m_nearestEnemy->v.origin).GetLengthSquared(), m_currentWeapon, m_skill);
+					m_enemyOrigin = GetPlayerHeadOrigin(m_nearestEnemy, (pev->origin - m_nearestEnemy->v.origin).GetLengthSquared(), m_currentWeapon, m_skill, (pev->punchangle.x < -1.45f));
 					m_lookAt = m_enemyOrigin;
 				}
 
@@ -800,6 +800,14 @@ void Bot::BaseUpdate(void)
 				Vector direction = (m_lookAt - EyePosition()).ToAngles();
 				direction.x = -direction.x; // invert for engine
 
+				// Smoothly compensate for weapon recoil by pulling the target direction opposite to the kick
+				if (pev->punchangle.x != 0.0f || pev->punchangle.y != 0.0f)
+				{
+					direction.x -= pev->punchangle.x * 1.15f; // vertical compensation (pull down)
+					direction.y -= pev->punchangle.y * 1.15f; // horizontal compensation (pull opposite)
+					direction.ClampAngles();
+				}
+
 				if (m_updateY)
 				{
 					const float angleDiffYaw = AngleNormalize(direction.y - pev->v_angle.y);
@@ -835,9 +843,6 @@ void Bot::BaseUpdate(void)
 						pev->v_angle.x += m_pathInterval * m_lookPitchVel;
 					}
 				}
-
-				pev->v_angle.y += pev->punchangle.y;
-				pev->v_angle.x -= pev->punchangle.x;
 
 				// set the body angles to point the gun correctly
 				pev->v_angle.ClampAngles();
@@ -916,6 +921,7 @@ void Bot::CheckSlowThink(void)
 	const float tempTimer = engine->GetTime();
 	if ((pev->origin - m_waypointOrigin).GetLengthSquared() > (m_waypointDistance * 2.0f))
 	{
+		m_currentWaypointIndex = -1;
 		FindWaypoint();
 		if (!m_isZombieBot && IsValidWaypoint(m_zhCampPointIndex))
 			FindPath(m_currentWaypointIndex, m_zhCampPointIndex);

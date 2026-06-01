@@ -24,6 +24,7 @@
 
 #include "../include/core.h"
 #include "bot_query_hook.h"
+#include "async_pathfinder.h"
 
 // console vars
 ConVar ebot_password("ebot_password", "ebot", VARTYPE_PASSWORD);
@@ -2194,6 +2195,7 @@ void ServerActivate(edict_t* pentEdictList, int edictCount, int clientMax)
 	ServerCommand("exec addons/ebot/maps/%s.cfg", GetMapName());
 
 	g_botManager->InitQuota();
+	g_asyncPathfinder.Start();
 
 	secondTimer = 0.0f;
 	g_fakeCommandTimer = 0.0f;
@@ -2217,6 +2219,7 @@ void ServerDeactivate(void)
 
 	// signal matrix calculation thread to stop
 	g_isMatrixCalculating = false;
+	g_asyncPathfinder.Stop();
 
 	secondTimer = 0.0f;
 	g_fakeCommandTimer = 0.0f;
@@ -2370,6 +2373,13 @@ inline void FrameThread(void)
 
 void StartFrame(void)
 {
+	static float g_asyncCacheTimer = 0.0f;
+	if (g_asyncCacheTimer < engine->GetTime())
+	{
+		g_waypoint->UpdateAsyncCache();
+		g_asyncCacheTimer = engine->GetTime() + 0.5f;
+	}
+
 	// this function starts a video frame. It is called once per video frame by the engine. If
 	// you run Half-Life at 90 fps, this function will then be called 90 times per second. By
 	// placing a hook on it, we have a good place to do things that should be done continuously

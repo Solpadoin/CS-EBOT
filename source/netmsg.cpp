@@ -244,8 +244,18 @@ void NetworkMsg::Execute(void)
 			if (m_args.Size() < 2)
 				break;
 
+			// HLTV (0, 0) signals a new round starting.
+			// For mods like Zombie Plague that don't send standard round-end
+			// text messages (#CTs_Win, #Terrorists_Win, etc.), g_roundEnded
+			// never gets set to true. We must force it here before RoundInit()
+			// resets the state, so bots stop shooting during the brief freeze period
+			// and enemy/friend lists are properly cleared.
 			if (!m_args[0].longVal && !m_args[1].longVal)
+			{
+				if (!g_roundEnded)
+					RoundEndMessage();  // ensures cleanup for mods that skip text messages
 				RoundInit();
+			}
 
 			break;
 		}
@@ -263,27 +273,72 @@ void NetworkMsg::Execute(void)
 
 			switch (x[1])
 			{
+				case 'A':
+				{
+					// #All_Hostages_Rescued
+					if (!cstrncmp(x, "#All_Hostages_Rescued", 21))
+						RoundEndMessage();
+					break;
+				}
 				case 'C':
 				{
-					if (!cstrncmp(x, "#CTs_Win", 8))
+					// #CTs_Win, #CTs_PreventEscape
+					if (!cstrncmp(x, "#CTs_Win", 8) || !cstrncmp(x, "#CTs_PreventEscape", 18))
 						RoundEndMessage();
 					break;
 				}
 				case 'T':
 				{
-					if (!cstrncmp(x, "#Terrorists_Win", 15))
+					// #Terrorists_Win, #Target_Bombed, #Target_Saved, #Terrorists_Escaped, #Terrorists_Not_Escaped
+					if (!cstrncmp(x, "#Terrorists_Win", 15) ||
+						!cstrncmp(x, "#Target_Bombed", 14) ||
+						!cstrncmp(x, "#Target_Saved", 13) ||
+						!cstrncmp(x, "#Terrorists_Escaped", 19) ||
+						!cstrncmp(x, "#Terrorists_Not_Escaped", 23))
 						RoundEndMessage();
 					break;
 				}
 				case 'R':
 				{
+					// #Round_Draw, #Round_End
 					if (!cstrncmp(x, "#Round_Draw", 11) || !cstrncmp(x, "#Round_End", 10))
 						RoundEndMessage();
 					break;
 				}
 				case 'G':
 				{
+					// #Game_Commencing, #Game_will_restart_in
 					if (!cstrncmp(x, "#Game_Commencing", 16) || !cstrncmp(x, "#Game_will_restart_in", 22))
+						RoundEndMessage();
+					break;
+				}
+				case 'H':
+				{
+					// #Hostages_Not_Rescued
+					if (!cstrncmp(x, "#Hostages_Not_Rescued", 21))
+						RoundEndMessage();
+					break;
+				}
+				case 'B':
+				{
+					// #Bomb_Defused (CT win)
+					if (!cstrncmp(x, "#Bomb_Defused", 13))
+						RoundEndMessage();
+					break;
+				}
+				case 'V':
+				{
+					// #VIP_Not_Escaped, #VIP_Assassinated, #VIP_Escaped
+					if (!cstrncmp(x, "#VIP_Not_Escaped", 16) ||
+						!cstrncmp(x, "#VIP_Assassinated", 17) ||
+						!cstrncmp(x, "#VIP_Escaped", 12))
+						RoundEndMessage();
+					break;
+				}
+				case 'E':
+				{
+					// #Escaping_Terrorists_Neutralized
+					if (!cstrncmp(x, "#Escaping_Terrorists_Neutralized", 32))
 						RoundEndMessage();
 					break;
 				}

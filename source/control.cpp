@@ -238,16 +238,16 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 					if (crandomfloat(0.0f, 1.0f) < 0.36f)
 					{
 						const char* wrappers[] = {
-							"xxX", "Xxx", "xXx", "xx", "XX", "xX", "Xx", "[", "]", "<", ">", "--", "__", "-->", "<--", "..", "-=", "=-"
+							"xxX", "Xxx", "xXx", "xx", "XX", "xX", "Xx", "[", "]", "<", ">", "-", "_", "__", "-->", "<--", ".", "-=", "=-", "=", "+", "!", "?", "(", ")", "*", "^^", "#"
 						};
 
-						int wIdx = crandomint(0, 13);
+						int wIdx = crandomint(0, ARRAYSIZE_HLSDK(wrappers) - 1);
 						const char* w = wrappers[wIdx];
 						int wLen = cstrlen(w);
 						if (wLen >= 2)
 						{
 							char tempName[128];
-							snprintf(tempName, sizeof(tempName), "%s%s%c", w, bName, w[1]);
+							snprintf(tempName, sizeof(tempName), "%s%s%s", w, bName, w);
 							cstrncpy(bName, tempName, sizeof(bName));
 						}
 					}
@@ -256,7 +256,7 @@ int BotControl::CreateBot(char name[32], int skill, int personality, const int t
 						const char* suffixes[] = {
 							".exe", ".dll", ".zip", ".rar", ".com", ".net"
 						};
-						int sIdx = crandomint(0, 5);
+						int sIdx = crandomint(0, ARRAYSIZE_HLSDK(suffixes) - 1);
 						const char* suf = suffixes[sIdx];
 						int len = cstrlen(bName);
 						if (len + cstrlen(suf) < static_cast<int>(sizeof(bName)) - 1)
@@ -1140,7 +1140,7 @@ void Bot::StartGame(void)
 		else if (ebot_forceteam.GetString()[0] == 'T' || ebot_forceteam.GetString()[0] == 't' || ebot_forceteam.GetString()[0] == '1') // 1 = T, 2 = CT
 			m_wantedTeam = 1;
 
-		if (m_wantedTeam != 1 && m_wantedTeam != 2)
+		if (!m_wantedTeam || (m_wantedTeam != 1 && m_wantedTeam != 2))
 			m_wantedTeam = 5;
 
 		// select the team the bot wishes to join...

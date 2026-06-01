@@ -241,7 +241,7 @@ void Bot::FindFriendsAndEnemiens(void)
 		m_enemySeeTime = engine->GetTime();
 
 		if (!FNullEnt(m_nearestEnemy)) // we need 2d distance
-			m_enemyOrigin = GetPlayerHeadOrigin(m_nearestEnemy, (myOrigin - m_nearestEnemy->v.origin).GetLengthSquared(), m_currentWeapon, m_skill);
+			m_enemyOrigin = GetPlayerHeadOrigin(m_nearestEnemy, (myOrigin - m_nearestEnemy->v.origin).GetLengthSquared(), m_currentWeapon, m_skill, (pev->punchangle.x < -1.45f));
 	}
 	else
 		m_isEnemyReachable = false;
@@ -425,11 +425,23 @@ void Bot::FireWeapon(const float distance)
 		if (selectTab[i].primaryFireHold) // if automatic weapon, just press attack
 		{
 			m_buttons |= IN_ATTACK;
-			if (distance > 768.0f && ctanf((cabsf(pev->punchangle.y) + cabsf(pev->punchangle.x)) * 0.00872664625f) * (distance + (distance * 0.25f)) > 100.0f)
+			if (distance > 300.0f)
 			{
-				// higher difficulty = less pause time (skill 1-100 -> pause 0.1s-0.4s)
-				float pauseMultiplier = crandomfloat(0.1f, 0.4f) * (1.0f - (m_skill / 125.0f));
-				m_firePause = engine->GetTime() + pauseMultiplier;
+				const float xPunch = squaredf(pev->punchangle.x * 0.01745329252f);
+				const float yPunch = squaredf(pev->punchangle.y * 0.01745329252f);
+				const float difficulty = static_cast<float>(m_skill);
+				const float tolerance = (100.0f - (difficulty * 0.25f)) / 99.0f;
+				const float baseTime = 0.55f;
+				const float maxRecoil = 5.0f;
+
+				if (ctanf(csqrtf(cabsf(xPunch) + cabsf(yPunch))) * distance > (25.0f + maxRecoil + tolerance))
+				{
+					if (m_firePause < engine->GetTime())
+					{
+						float pauseMultiplier = crandomfloat(baseTime, baseTime + maxRecoil * 0.01f * tolerance) - m_frameInterval;
+						m_firePause = engine->GetTime() + pauseMultiplier;
+					}
+				}
 			}
 		}
 		else // if not, toggle the buttons

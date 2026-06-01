@@ -56,7 +56,7 @@ void Engine::PushRegisteredConVarsToEngine(void)
 	{
 		ptr = &m_regVars[i];
 		if (!ptr)
-			break;
+			continue;
 
 		g_engfuncs.pfnCVarRegister(&ptr->reg);
 		ptr->self->m_eptr = g_engfuncs.pfnCVarGetPointer(ptr->reg.name);
@@ -172,7 +172,7 @@ const Entity& Engine::GetEntityByIndex(const int index)
 
 const Client& Engine::GetClientByIndex(const int index)
 {
-	if (index >= 0 || index < 32)
+	if (index >= 0 && index < 32)
 		return m_clients[index];
 
 	return m_clients[0];
