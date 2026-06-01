@@ -2205,10 +2205,8 @@ void CalculateMatrix(void* arg)
 	tthread::atomic<int> nextStartNode(0);
 
 	unsigned int numThreads = tthread::thread::hardware_concurrency();
-	if (numThreads > 1)
-		numThreads--; // leave at least one core free for the game engine!
-	if (numThreads > 3)
-		numThreads = 3; // cap at 3 threads to ensure responsiveness
+	if (numThreads > 4)
+		numThreads = 4;
 
 	if (numThreads > 1)
 		ServerPrint("FOUND %i THREADS FOR MATRIX CALCULATIONS", numThreads);
