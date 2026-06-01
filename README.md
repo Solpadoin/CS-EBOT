@@ -5,7 +5,7 @@ AI Bot for Counter-Strike based on SyPB, this bot is only for zombie plague/esca
 
 [Click HERE To Join E-BOT Steam Community](https://steamcommunity.com/groups/E125G)
 
-[Please Download From The Blog For Support This Project](https://ebots-for-cs.blogspot.com/)
+[Please Download From the Blog to Support This Project](https://ebots-for-cs.blogspot.com/)
 
 # E-Bot Requires VCRedist (For Windows)
 If you see badf load on console (when you type "meta list") install this.
