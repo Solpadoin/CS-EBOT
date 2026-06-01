@@ -37,4 +37,22 @@ __asm__(".symver snprintf,snprintf@GLIBC_2.0");
 __asm__(".symver pthread_mutex_trylock,pthread_mutex_trylock@GLIBC_2.0");
 __asm__(".symver pthread_detach,pthread_detach@GLIBC_2.0");
 __asm__(".symver pthread_create,pthread_create@GLIBC_2.0");
+// Additional symbols from readelf output (targeting lowest versions)
+__asm__(".symver memcpy,memcpy@GLIBC_2.0");
+__asm__(".symver memset,memset@GLIBC_2.0");
+__asm__(".symver rand,rand@GLIBC_2.0");
+__asm__(".symver gettimeofday,gettimeofday@GLIBC_2.0");
+__asm__(".symver sendto,sendto@GLIBC_2.0");
+__asm__(".symver sendmsg,sendmsg@GLIBC_2.0");
+__asm__(".symver pthread_mutex_lock,pthread_mutex_lock@GLIBC_2.0");
+__asm__(".symver pthread_mutex_unlock,pthread_mutex_unlock@GLIBC_2.0");
+__asm__(".symver mprotect,mprotect@GLIBC_2.0");
+__asm__(".symver sysconf,sysconf@GLIBC_2.0");
+__asm__(".symver __errno_location,__errno_location@GLIBC_2.0");
+__asm__(".symver ___tls_get_addr,___tls_get_addr@GLIBC_2.3");
+__asm__(".symver __cxa_atexit,__cxa_atexit@GLIBC_2.1.3");
+__asm__(".symver __cxa_finalize,__cxa_finalize@GLIBC_2.1.3");
+// These require GLIBC_2.34 - if compatibility is needed, consider alternative implementations
+// __asm__(".symver pthread_join,pthread_join@GLIBC_2.34");
+// __asm__(".symver pthread_create,pthread_create@GLIBC_2.34");
 #endif
