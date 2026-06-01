@@ -28,7 +28,7 @@
 #define PRODUCT_DEV_VERSION_FORTEST ""
 
 // E-Bot Version
-#define PRODUCT_VERSION_DWORD 110,20241201,11 // yyyy/mm/dd
+#define PRODUCT_VERSION_DWORD 110,20260601,12 // yyyy/mm/dd
 #define PRODUCT_VERSION "1.10"
 #define PRODUCT_VERSION_F 1.10
 
@@ -43,7 +43,7 @@
 #define PRODUCT_LEGAL "Half-Life, Counter-Strike, Steam, Valve is a trademark of Valve Corporation"
 #define PRODUCT_ORIGINAL_NAME "ebot.dll"
 #define PRODUCT_INTERNAL_NAME "ebot"
-#define PRODUCT_SUPPORT_VERSION "1.0 - CZ"
+#define PRODUCT_SUPPORT_VERSION "1.6 - CZ"
 #define PRODUCT_DATE __DATE__
 
 // product optimization type (we're not using crt builds anymore)
