@@ -49,7 +49,7 @@ __asm__(".symver pthread_mutex_unlock,pthread_mutex_unlock@GLIBC_2.0");
 __asm__(".symver mprotect,mprotect@GLIBC_2.0");
 __asm__(".symver sysconf,sysconf@GLIBC_2.0");
 __asm__(".symver __errno_location,__errno_location@GLIBC_2.0");
-__asm__(".symver ___tls_get_addr,___tls_get_addr@GLIBC_2.0");
-__asm__(".symver __cxa_atexit,__cxa_atexit@GLIBC_2.0");
-__asm__(".symver __cxa_finalize,__cxa_finalize@GLIBC_2.0");
+__asm__(".symver ___tls_get_addr,___tls_get_addr@GLIBC_2.3");
+__asm__(".symver __cxa_atexit,__cxa_atexit@GLIBC_2.1.3");
+__asm__(".symver __cxa_finalize,__cxa_finalize@GLIBC_2.1.3");
 #endif
