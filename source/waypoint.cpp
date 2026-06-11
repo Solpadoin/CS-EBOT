@@ -99,40 +99,26 @@ inline void CreateWaypoint(const Vector& start, Vector& Next, float range, const
 
 	range *= rngmul;
 	bool isBreakable = IsBreakable(tr.pHit);
-	bool requiresCrouch = false;
-	Vector probePosition = tr.vecEndPos;
-
 	if (tr.flFraction < 1.0f && !isBreakable)
-	{
-		TraceResult pointCheck;
-		const Vector pointProbe = Vector(Next.x, Next.y, Next.z + 19.0f);
-		TraceHull(pointProbe, pointProbe, TraceIgnore::Monsters, point_hull, g_hostEntity, &pointCheck);
+		return;
 
-		if (pointCheck.flFraction < 1.0f)
-			return;
-
-		probePosition = pointProbe;
-		requiresCrouch = true;
-	}
-
-	const float mergeRange = cmaxf(range * 0.55f, 8.0f);
-	int16_t index = g_waypoint->FindNearestAnalyzer(probePosition, mergeRange, mergeRange);
+	int16_t index = g_waypoint->FindNearestAnalyzer(tr.vecEndPos, range, range);
 	if (IsValidWaypoint(index))
 		return;
 
 	TraceResult tr2;
-	TraceHull(probePosition, Vector(probePosition.x, probePosition.y, (probePosition.z - 800.0f)), TraceIgnore::Monsters, requiresCrouch ? point_hull : head_hull, g_hostEntity, &tr2);
+	TraceHull(tr.vecEndPos, Vector(tr.vecEndPos.x, tr.vecEndPos.y, (tr.vecEndPos.z - 800.0f)), TraceIgnore::Monsters, head_hull, g_hostEntity, &tr2);
 	if (tr2.flFraction >= 1.0f)
 		return;
 
 	Vector TargetPosition = tr2.vecEndPos;
 	TargetPosition.z = TargetPosition.z + 19.0f;
 
-	index = g_waypoint->FindNearestAnalyzer(TargetPosition, mergeRange, mergeRange);
+	index = g_waypoint->FindNearestAnalyzer(TargetPosition, range, range);
 	if (IsValidWaypoint(index))
 		return;
 
-	g_analyzeputrequirescrouch = requiresCrouch || CheckCrouchRequirement(TargetPosition);
+	g_analyzeputrequirescrouch = CheckCrouchRequirement(TargetPosition);
 	if (g_waypoint->IsNodeReachableAnalyze(start, TargetPosition, 267.0f) || g_waypoint->IsNodeReachableAnalyze(start, TargetPosition, 267.0f, false))
 		g_waypoint->Add(isBreakable ? 1 : -1, g_analyzeputrequirescrouch ? Vector(TargetPosition.x, TargetPosition.y, (TargetPosition.z - 18.0f)) : TargetPosition, range * 2.5f);
 }
