@@ -76,6 +76,9 @@ inline float GetDistance(const int16_t& start, const int16_t& goal)
 
 void Bot::FindFriendsAndEnemiens(void)
 {
+	extern ConVar ebot_has_semiclip;
+	const bool disableFriendBlocking = ebot_has_semiclip.GetBool();
+
 	m_numEnemiesLeft = 0;
 	m_numFriendsLeft = 0;
 	m_numFriendsNear = 0;
@@ -123,6 +126,9 @@ void Bot::FindFriendsAndEnemiens(void)
 			if (client.team == m_team)
 			{
 				m_numFriendsLeft++;
+				if (disableFriendBlocking)
+					continue;
+
 				distance = GetDistance(myWP, client.wp);
 				if (distance < m_friendDistance)
 				{
@@ -192,6 +198,9 @@ void Bot::FindFriendsAndEnemiens(void)
 			if (client.team == m_team)
 			{
 				m_numFriendsLeft++;
+				if (disableFriendBlocking)
+					continue;
+
 				distance = GetDistance(myWP, client.wp);
 				if (distance < m_friendDistance)
 				{
@@ -628,9 +637,6 @@ void Bot::SelectBestWeapon(void)
 		SelectKnife();
 		return;
 	}
-
-	if (!m_isSlowThink)
-		return;
 	
 	int i, id;
 	const WeaponSelect* selectTab = &g_weaponSelect[0];
@@ -641,6 +647,19 @@ void Bot::SelectBestWeapon(void)
 		if (pev->weapons & (1 << id))
 		{
 			if (m_ammo[g_weaponDefs[id].ammo1])
+			{
+				chosenWeaponIndex = i;
+				break;
+			}
+		}
+	}
+
+	if (chosenWeaponIndex == -1)
+	{
+		for (i = Const_NumWeapons; i; i--)
+		{
+			id = selectTab[i].id;
+			if (id != Weapon::Knife && (pev->weapons & (1 << id)))
 			{
 				chosenWeaponIndex = i;
 				break;
@@ -673,12 +692,11 @@ int Bot::GetHighestWeapon(void)
 	return -1;
 }
 
-static float wpnTimer = 0.05;
 void Bot::SelectWeaponByName(const char* name)
 {
-	if (wpnTimer < engine->GetTime())
+	if (m_wpnTimer < engine->GetTime())
 	{
 		FakeClientCommand(GetEntity(), name);
-		wpnTimer = engine->GetTime() + 0.05;
+		m_wpnTimer = engine->GetTime() + 0.05f;
 	}
 }

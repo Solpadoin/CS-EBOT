@@ -14,11 +14,21 @@ void Bot::DefaultUpdate(void)
 		// nearest enemy never resets to nullptr, so bot always know where are alive humans
 		if (IsAlive(m_nearestEnemy) && GetTeam(m_nearestEnemy) != m_team)
 		{
+			int16_t enemyWaypoint = g_clients[ENTINDEX(m_nearestEnemy) - 1].wp;
+			if (!IsValidWaypoint(enemyWaypoint))
+				enemyWaypoint = g_waypoint->FindNearest(m_nearestEnemy->v.origin);
+
 			if (m_isSlowThink)
 			{
 				CheckReachable();
 				if (!CheckVisibility(m_nearestEnemy))
 					m_isEnemyReachable = false;
+
+				if (IsValidWaypoint(enemyWaypoint) && enemyWaypoint != m_currentGoalIndex)
+				{
+					m_currentGoalIndex = enemyWaypoint;
+					FindPath(m_currentWaypointIndex, enemyWaypoint);
+				}
 			}
 			else if (m_enemyDistance < 512.0f && chanceof(m_skill))
 				KnifeAttack();
@@ -56,15 +66,14 @@ void Bot::DefaultUpdate(void)
 				if (m_isSlowThink && m_navNode.HasNext() && (g_waypoint->m_paths[m_navNode.Last()].origin - pev->origin).GetLengthSquared() < (g_waypoint->m_paths[m_navNode.Last()].origin - m_nearestEnemy->v.origin).GetLengthSquared())
 				{
 					KnifeAttack();
-					int16_t index = g_clients[ENTINDEX(m_nearestEnemy) - 1].wp;
-					if (IsValidWaypoint(index))
+					if (IsValidWaypoint(enemyWaypoint))
 					{
-						m_currentGoalIndex = index;
-						FindPath(m_currentWaypointIndex, index);
+						m_currentGoalIndex = enemyWaypoint;
+						FindPath(m_currentWaypointIndex, enemyWaypoint);
 					}
 					else
 					{
-						index = g_waypoint->FindNearest(m_nearestEnemy->v.origin);
+						int16_t index = g_waypoint->FindNearest(m_nearestEnemy->v.origin);
 						if (IsValidWaypoint(index))
 						{
 							m_currentGoalIndex = index;
@@ -77,15 +86,14 @@ void Bot::DefaultUpdate(void)
 			}
 			else
 			{
-				int16_t index = g_clients[ENTINDEX(m_nearestEnemy) - 1].wp;
-				if (IsValidWaypoint(index))
+				if (IsValidWaypoint(enemyWaypoint))
 				{
-					m_currentGoalIndex = index;
-					FindPath(m_currentWaypointIndex, index);
+					m_currentGoalIndex = enemyWaypoint;
+					FindPath(m_currentWaypointIndex, enemyWaypoint);
 				}
 				else
 				{
-					index = g_waypoint->FindNearest(m_nearestEnemy->v.origin);
+					int16_t index = g_waypoint->FindNearest(m_nearestEnemy->v.origin);
 					if (IsValidWaypoint(index))
 					{
 						m_currentGoalIndex = index;
@@ -102,6 +110,8 @@ void Bot::DefaultUpdate(void)
 		}
 		else
 		{
+			m_nearestEnemy = nullptr;
+			m_hasEnemiesNear = false;
 			m_isEnemyReachable = false;
 
 			// search other bots to get valid enemy
@@ -117,13 +127,20 @@ void Bot::DefaultUpdate(void)
 				}
 			}
 
+			if (!m_navNode.IsEmpty() && IsValidWaypoint(m_currentGoalIndex) && m_currentWaypointIndex == m_currentGoalIndex)
+				m_navNode.Clear();
+
+			if (!m_navNode.IsEmpty() && IsValidWaypoint(m_navNode.First()) && m_navNode.First() == m_currentWaypointIndex && !m_navNode.HasNext())
+				m_navNode.Clear();
+
 			if (!m_navNode.IsEmpty())
 				FollowPath();
 			else
 			{
 				KnifeAttack();
 				int16_t ref = FindGoalZombie();
-				FindPath(m_currentWaypointIndex, ref);
+				if (IsValidWaypoint(ref) && ref != m_currentWaypointIndex)
+					FindPath(m_currentWaypointIndex, ref);
 			}
 		}
 
@@ -216,23 +233,12 @@ void Bot::DefaultUpdate(void)
 		{
 			if (!m_navNode.IsEmpty())
 			{
-				if (m_hasFriendsNear && !FNullEnt(m_nearestFriend) && (pev->origin - m_nearestFriend->v.origin).GetLengthSquared() < squaredf(48.0f))
-				{
-					const Bot* bot = g_botManager->GetBot(m_nearestFriend);
-					if (bot && bot->m_navNode.IsEmpty() && m_zhCampPointIndex == bot->m_zhCampPointIndex)
-					{
-						m_navNode.Clear();
-						MoveTo(m_nearestFriend->v.origin);
-						return;
-					}
-				}
-
 				FollowPath();
 				return;
 			}
 
 			const Path zhPath = g_waypoint->m_paths[m_zhCampPointIndex];
-			if (!(zhPath.flags & WAYPOINT_ZMHMCAMP) && !(zhPath.flags & WAYPOINT_HMCAMPMESH))
+			if (!(zhPath.flags & WAYPOINT_ZMHMCAMP) && !(zhPath.flags & WAYPOINT_HMCAMPMESH) && !(zhPath.flags & WAYPOINT_HUMANHIGHSPOT))
 			{
 				m_moveSpeed = pev->maxspeed;
 				m_zhCampPointIndex = -1;
@@ -247,7 +253,10 @@ void Bot::DefaultUpdate(void)
 				if (((zhPath.origin - pev->origin).GetLengthSquared2D() > squaredf(maxRange) || (zhPath.origin.z - 54.0f > pev->origin.z)))
 				{
 					FindWaypoint();
-					FindPath(m_currentWaypointIndex, m_currentGoalIndex);
+					if (m_currentWaypointIndex == m_currentGoalIndex)
+						MoveTo(zhPath.origin);
+					else
+						FindPath(m_currentWaypointIndex, m_currentGoalIndex);
 					return;
 				}
 			}
@@ -276,6 +285,9 @@ void Bot::DefaultUpdate(void)
 						if (zhPath.mesh != g_waypoint->GetPath(index)->mesh)
 							continue;
 
+						if (!m_hasEnemiesNear && index == m_currentWaypointIndex && g_waypoint->m_hmMeshPoints.Size() > 1)
+							continue;
+
 						MeshWaypoints.Push(index);
 					}
 
@@ -293,13 +305,23 @@ void Bot::DefaultUpdate(void)
 							else if (m_personality != Personality::Careful)
 								max = 12.0f;
 						}
+						else
+							max = crandomfloat(3.5f, 7.5f);
 
-						m_currentProcessTime = time2 + crandomfloat(8.0f, max);
+						m_currentProcessTime = time2 + (m_hasEnemiesNear ? crandomfloat(8.0f, max) : max);
 						m_zhCampPointIndex = m_myMeshWaypoint;
 						m_currentGoalIndex = m_zhCampPointIndex;
 						FindPath(m_currentWaypointIndex, m_myMeshWaypoint);
 					}
 				}
+			}
+
+			if (!m_hasEnemiesNear && !m_hasEntitiesNear && !m_isSlowThink && chanceof(2))
+			{
+				const float yaw = Math::DegreeToRadian(crandomfloat(0.0f, 360.0f));
+				const float pitch = crandomfloat(-28.0f, 18.0f);
+				const Vector glance = pev->origin + pev->view_ofs + Vector(ccosf(yaw) * 256.0f, csinf(yaw) * 256.0f, pitch);
+				LookAt(glance);
 			}
 
 			// standing still
@@ -324,12 +346,16 @@ void Bot::DefaultUpdate(void)
 		}
 		else
 		{
-			if (m_navNode.HasNext())
+			if (m_navNode.HasNext() || (!m_navNode.IsEmpty() && IsValidWaypoint(m_navNode.First()) && m_navNode.First() != m_currentWaypointIndex))
 				FollowPath();
-			else if (IsValidWaypoint(m_zhCampPointIndex))
+			else if (IsValidWaypoint(m_zhCampPointIndex) && m_zhCampPointIndex != m_currentWaypointIndex)
 				FindPath(m_currentWaypointIndex, m_zhCampPointIndex);
 			else
+			{
 				m_zhCampPointIndex = FindGoalHuman();
+				if (IsValidWaypoint(m_zhCampPointIndex) && m_zhCampPointIndex != m_currentWaypointIndex)
+					FindPath(m_currentWaypointIndex, m_zhCampPointIndex);
+			}
 		}
 	}
 }

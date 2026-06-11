@@ -120,7 +120,7 @@
 	  <BuildStlModules>false</BuildStlModules>
 	  <GuardEHContMetadata>false</GuardEHContMetadata>
 	  <SupportJustMyCode>true</SupportJustMyCode>
-	  <AdditionalOptions>/clang:-mstackrealign %(AdditionalOptions)</AdditionalOptions>
+	  <AdditionalOptions>/guard:cf- /clang:-mstackrealign %(AdditionalOptions)</AdditionalOptions>
 	</ClCompile>
 	<ResourceCompile>
 	  <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -165,7 +165,11 @@
 	  <EnableUAC>false</EnableUAC>
 	  <AllowIsolation>false</AllowIsolation>
 	  <PreventDllBinding>true</PreventDllBinding>
+	  <AdditionalOptions>/guard:no %(AdditionalOptions)</AdditionalOptions>
 	</Link>
+	<PostBuildEvent>
+	  <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)FixGuardFlags.ps1" "$(TargetPath)"</Command>
+	</PostBuildEvent>
 	<Manifest>
 	  <SuppressDependencyElement>true</SuppressDependencyElement>
 	</Manifest>

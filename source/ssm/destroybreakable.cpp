@@ -3,7 +3,10 @@ ConVar ebot_kill_breakables("ebot_kill_breakables", "0");
 
 void Bot::DestroyBreakableStart(void)
 {
-	SelectBestWeapon();
+	if (m_isZombieBot)
+		SelectKnife();
+	else
+		SelectBestWeapon();
 }
 
 void Bot::DestroyBreakableUpdate(void)
@@ -18,29 +21,37 @@ void Bot::DestroyBreakableUpdate(void)
 		m_breakableEntity->v.health = -1.0f;
 
 	LookAt(m_breakableOrigin);
+	const bool visible = IsVisible(m_breakableOrigin, GetEntity());
+	const float distance = (pev->origin - m_breakableOrigin).GetLengthSquared();
+
 	if (pev->origin.z > m_breakableOrigin.z)
 		m_duckTime = engine->GetTime() + 1.0f;
-	else if (!IsVisible(m_breakableOrigin, GetEntity()))
+	else if (!visible)
 		m_duckTime = engine->GetTime() + 1.0f;
 
-	if (!m_isZombieBot && m_currentWeapon != Weapon::Knife)
-		FireWeapon((pev->origin - m_breakableOrigin).GetLengthSquared());
+	if (!m_isZombieBot && m_currentWeapon != Weapon::Knife && visible)
+	{
+		m_moveSpeed = 0.0f;
+		m_strafeSpeed = 0.0f;
+		FireWeapon(distance);
+		m_buttons |= IN_ATTACK;
+	}
 	else
 	{
 		MoveTo(m_breakableOrigin, true);
-		SelectBestWeapon();
+		if (m_isZombieBot)
+			SelectKnife();
+		else
+			SelectBestWeapon();
 		m_buttons |= IN_ATTACK;
 	}
 
 	IgnoreCollisionShortly();
-	m_pauseTime = engine->GetTime() + crandomfloat(2.0f, 7.0f);
+	m_pauseTime = engine->GetTime() + crandomfloat(0.12f, 0.35f);
 }
 
 void Bot::DestroyBreakableEnd(void)
 {
-	if (!FNullEnt(m_breakableEntity) && m_breakableEntity->v.health > 0.0f)
-		m_ignoreEntity = m_breakableEntity;
-
 	m_breakableEntity = nullptr;
 }
 
@@ -55,7 +66,7 @@ bool Bot::DestroyBreakableReq(void)
 	if (m_breakableEntity->v.takedamage == DAMAGE_NO)
 		return false;
 
-	if (m_ignoreEntity == m_breakableEntity)
+	if ((pev->origin - m_breakableOrigin).GetLengthSquared() > squaredf(1536.0f))
 		return false;
 
 	return true;

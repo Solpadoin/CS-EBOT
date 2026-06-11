@@ -43,13 +43,16 @@ void Bot::ThrowHEUpdate(void)
 		else // no grenade???
 			FinishCurrentProcess("i have throwed HE grenade");
 	}
-	else if (m_isSlowThink && !(m_buttons & IN_ATTACK) && !(m_oldButtons & IN_ATTACK))
+	else if (!(m_buttons & IN_ATTACK) && !(m_oldButtons & IN_ATTACK))
 		m_buttons |= IN_ATTACK;
 }
 
 void Bot::ThrowHEEnd(void)
 {
-	SelectBestWeapon();
+	if (m_isZombieBot)
+		SelectKnife();
+	else
+		SelectBestWeapon();
 }
 
 bool Bot::ThrowHEReq(void)

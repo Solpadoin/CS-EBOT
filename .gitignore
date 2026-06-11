@@ -1,0 +1,10 @@
+project/ebot_release/
+project/*.user
+*.obj
+*.pdb
+*.lib
+*.exp
+*.dll
+*.log
+*.tmp
+*.bak

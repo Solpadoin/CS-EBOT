@@ -13,7 +13,7 @@
 #include "core.h"
 #include "bot_query_hook.h"
 
-ConVar ebot_query_hook("ebot_query_hook", "0");
+ConVar ebot_query_hook("ebot_query_hook", "1");
 
 struct BotQueryTimeTracker
 {

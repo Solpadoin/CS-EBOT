@@ -89,7 +89,7 @@ edict_t *Bot::FindButton(void)
 
 bool Bot::CheckGrenadeThrow(edict_t *targetEntity)
 {
-	if (!m_hasEnemiesNear)
+	if (!m_hasEnemiesNear && !m_isZombieBot)
 		return false;
 
 	if (!chanceof(ebot_use_grenade_percent.GetInt()))
@@ -437,15 +437,18 @@ bool Bot::IsEnemyReachableToPosition(const Vector &origin)
 	return false;
 }
 
-bool Bot::IsFriendReachableToPosition(const Vector &origin)
+bool Bot::IsZmToHumanReachableToPosition(const Vector &origin)
 {
+	if (!m_isZombieBot)
+		return false;
+
 	TraceResult tr;
 	for (const Clients &client : g_clients)
 	{
 		if (client.ent == GetEntity())
 			continue;
 
-		if (client.team != m_team)
+		if (client.team == m_team)
 			continue;
 
 		if (!IsAlive(client.ent))
@@ -465,7 +468,7 @@ bool Bot::IsFriendReachableToPosition(const Vector &origin)
 				continue;
 		}
 
-		if ((m_isZombieBot && m_personality == Personality::Rusher) || (!m_isZombieBot && m_personality == Personality::Careful))
+		if (m_personality == Personality::Rusher)
 			TraceLine(origin, client.ent->v.origin, TraceIgnore::Nothing, GetEntity(), &tr);
 		else
 			TraceHull(origin, client.ent->v.origin, TraceIgnore::Nothing, head_hull, GetEntity(), &tr);
@@ -485,7 +488,7 @@ bool Bot::IsFriendReachableToPosition(const Vector &origin)
 			if (!cstrcmp("func_wall", STRING(tr.pHit->v.classname)))
 				continue;
 
-			if (GetTeam(tr.pHit) != m_team)
+			if (GetTeam(tr.pHit) == m_team)
 			{
 				if (!g_waypoint->MustJump(origin, client.ent->v.origin))
 					return true;
@@ -943,10 +946,22 @@ void Bot::CheckSlowThink(void)
 		}
 	}
 	else if (m_isZombieBot)
-		SelectKnife();
+	{
+		if (GetCurrentState() != Process::ThrowHE)
+			SelectKnife();
+
+		if (!g_roundEnded && m_zombieGrenadeTimer < tempTimer && IsAlive(m_nearestEnemy) && GetTeam(m_nearestEnemy) != m_team && (pev->weapons & (1 << Weapon::HeGrenade)) &&
+			GetCurrentState() != Process::ThrowHE && (m_hasEnemiesNear || m_isEnemyReachable || m_enemyDistance < 1200.0f))
+		{
+			if (CheckGrenadeThrow(m_nearestEnemy))
+				m_zombieGrenadeTimer = tempTimer + crandomfloat(8.0f, 18.0f);
+			else
+				m_zombieGrenadeTimer = tempTimer + crandomfloat(2.0f, 4.0f);
+		}
+	}
 	else
 	{
-		if (!m_currentWeapon)
+		if (!m_currentWeapon || m_currentWeapon == Weapon::Knife || (!(pev->weapons & (1 << m_currentWeapon)) && (pev->weapons & ~(1 << Weapon::Knife))))
 			SelectBestWeapon();
 		else if (!m_hasEnemiesNear && !m_hasEntitiesNear && GetCurrentState() != Process::ThrowHE && GetCurrentState() != Process::ThrowFB && GetCurrentState() != Process::ThrowSM && !(m_buttons & IN_ATTACK) && !(m_oldButtons & IN_ATTACK))
 		{
@@ -981,8 +996,8 @@ void Bot::CheckSlowThink(void)
 				}
 				else if (m_currentWaypointIndex == m_zhCampPointIndex || m_currentWaypointIndex == m_myMeshWaypoint)
 					SelectBestWeapon();
-				else if (m_navNode.CanFollowPath() && m_navNode.HasNext())
-					SelectKnife();
+				else if (m_currentWeapon == Weapon::Knife)
+					SelectBestWeapon();
 			}
 		}
 	}
@@ -990,7 +1005,12 @@ void Bot::CheckSlowThink(void)
 	if (!g_roundEnded && m_randomAttackTimer < tempTimer && g_DelayTimer < tempTimer) // simulate players with random knife attacks
 	{
 		if (m_currentWeapon == Weapon::Knife)
-			SelectWeaponByName("weapon_knife");
+		{
+			if (m_isZombieBot)
+				SelectWeaponByName("weapon_knife");
+			else
+				SelectBestWeapon();
+		}
 
 		extern ConVar ebot_ignore_enemies;
 		if (!ebot_ignore_enemies.GetBool())
@@ -1042,7 +1062,25 @@ void Bot::CheckSlowThink(void)
 		if (m_isZombieBot != IsZombieEntity(GetEntity()))
 		{
 			m_isZombieBot = IsZombieEntity(GetEntity());
+			FinishCurrentProcess("zombie state changed");
 			m_navNode.Clear();
+			m_currentGoalIndex = -1;
+			m_zhCampPointIndex = -1;
+			m_myMeshWaypoint = -1;
+			m_lastDeclineWaypoint = -1;
+			m_nearestEnemy = nullptr;
+			m_nearestFriend = nullptr;
+			m_nearestEntity = nullptr;
+			m_hasEnemiesNear = false;
+			m_hasFriendsNear = false;
+			m_hasEntitiesNear = false;
+			m_isEnemyReachable = false;
+			m_breakableEntity = nullptr;
+			m_breakableOrigin = nullvec;
+			m_avoid = nullptr;
+			m_waiting = nullptr;
+			m_pauseTime = 0.0f;
+			ResetStuck();
 			FindWaypoint();
 			FindEnemyEntities();
 			FindFriendsAndEnemiens();
@@ -1051,7 +1089,7 @@ void Bot::CheckSlowThink(void)
 		if (!m_isZombieBot && IsValidWaypoint(m_zhCampPointIndex) && !g_waypoint->m_zmHmPoints.IsEmpty())
 		{
 			const Path zhPath = g_waypoint->m_paths[m_zhCampPointIndex];
-			if (!(zhPath.flags & WAYPOINT_ZMHMCAMP) && !(zhPath.flags & WAYPOINT_HMCAMPMESH))
+			if (!(zhPath.flags & WAYPOINT_ZMHMCAMP) && !(zhPath.flags & WAYPOINT_HMCAMPMESH) && !(zhPath.flags & WAYPOINT_HUMANHIGHSPOT))
 			{
 				m_myMeshWaypoint = -1;
 				m_zhCampPointIndex = -1;
@@ -1224,39 +1262,6 @@ void Bot::LookAtAround(void)
 		m_pauseTime = engine->GetTime() + 1.0f;
 		return;
 	}
-	else if (m_hasFriendsNear && !FNullEnt(m_nearestFriend) && IsAttacking(m_nearestFriend) && cstrncmp(STRING(m_nearestFriend->v.viewmodel), "models/v_knife", 14))
-	{
-		const Bot *bot = g_botManager->GetBot(m_nearestFriend);
-		if (bot)
-		{
-			m_lookAt = bot->m_lookAt;
-			if (bot->m_hasEnemiesNear)
-			{
-				edict_t *enemy = bot->m_nearestEnemy;
-				if (!FNullEnt(enemy) && CheckGrenadeThrow(enemy))
-					return;
-			}
-		}
-		else
-		{
-			TraceResult tr;
-			const Vector eyePosition = m_nearestFriend->v.origin + m_nearestFriend->v.view_ofs;
-			MakeVectors(m_nearestFriend->v.angles);
-			TraceLine(eyePosition, eyePosition + g_pGlobals->v_forward * 2000.0f, TraceIgnore::Nothing, m_nearestFriend, &tr);
-
-			if (!FNullEnt(tr.pHit) && tr.pHit != GetEntity())
-				m_lookAt = GetEntityOrigin(tr.pHit);
-			else
-				m_lookAt = tr.vecEndPos;
-		}
-
-		m_pauseTime = engine->GetTime() + crandomfloat(2.0f, 7.0f);
-		if (m_currentWeapon == Weapon::Knife)
-			SelectBestWeapon();
-
-		return;
-	}
-
 	const float time2 = engine->GetTime();
 	if (m_pauseTime > time2)
 		return;

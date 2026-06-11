@@ -202,6 +202,7 @@ enum WaypointFlag : uint32_t
 	WAYPOINT_ONLYONE = (1 << 19), // to avoid multiple bots stuck on same waypoint
 	WAYPOINT_WAITUNTIL = (1 << 20), // inverse fall check
 	WAYPOINT_HELICOPTER = (1 << 21), // helicopter for zombie escape maps
+	WAYPOINT_HUMANHIGHSPOT = (1 << 22), // reachable elevated human fallback point
 	WAYPOINT_FALLCHECK = (1 << 26), // bots will check ground
 	WAYPOINT_JUMP = (1 << 27), // for jump points
 	WAYPOINT_SNIPER = (1 << 28), // it's a specific sniper point
@@ -743,6 +744,8 @@ public:
 	edict_t *m_nearestFriend{nullptr};
 	edict_t *m_nearestEntity{nullptr};
 	float m_wpnTimer{0.0f};
+	float m_zpMenuTimer{0.0f};
+	float m_zombieGrenadeTimer{0.0f};
 	Vector m_enemyOrigin{nullvec};
 	Vector m_friendOrigin{nullvec};
 	Vector m_entityOrigin{nullvec};
@@ -801,7 +804,7 @@ public:
 	bool IsAttacking(const edict_t *player);
 	bool CheckReachable(void);
 	bool IsEnemyReachableToPosition(const Vector &origin);
-	bool IsFriendReachableToPosition(const Vector &origin);
+	bool IsZmToHumanReachableToPosition(const Vector &origin);
 	bool CanIReachToPosition(const Vector &origin);
 
 	// SSM
@@ -1038,6 +1041,7 @@ private:
 	CArray<int16_t> m_terrorPoints;
 	CArray<int16_t> m_zmHmPoints;
 	CArray<int16_t> m_hmMeshPoints;
+	CArray<int16_t> m_hmHighSpotPoints;
 	CArray<BucketEntry> m_buckets;
 public:
 	struct Bucket { int16_t x, y, z; };
@@ -1054,6 +1058,10 @@ public:
 	void AnalyzeDeleteUselessWaypoints(void);
 	void InitTypes(void);
 	void AddZMCamps(void);
+	void AddHighSpotPoints(void);
+	void AssignHumanCampGroups(void);
+	void ConnectReachableGaps(void);
+	void NormalizeLadderFlags(void);
 	void AddPath(const int16_t addIndex, const int16_t pathIndex,const int type = 0);
 
 	int16_t GetFacingIndex(void);

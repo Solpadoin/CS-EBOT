@@ -29,7 +29,7 @@
 constexpr int16_t pMax = static_cast<int16_t>(Const_MaxPathIndex);
 
 ConVar ebot_zombies_as_path_cost("ebot_zombie_count_as_path_cost", "1");
-ConVar ebot_has_semiclip("ebot_has_semiclip", "0");
+ConVar ebot_has_semiclip("ebot_has_semiclip", "1");
 ConVar ebot_breakable_health_limit("ebot_breakable_health_limit", "3000.0");
 ConVar ebot_force_shortest_path("ebot_force_shortest_path", "0");
 ConVar ebot_pathfinder_seed_min("ebot_pathfinder_seed_min", "0.9");
@@ -37,11 +37,32 @@ ConVar ebot_pathfinder_seed_max("ebot_pathfinder_seed_max", "1.1");
 ConVar ebot_helicopter_width("ebot_helicopter_width", "54.0");
 ConVar ebot_use_pathfinding_for_avoid("ebot_use_pathfinding_for_avoid", "1");
 
+inline int16_t FindRoamGoalForBot(Bot* owner, const bool preferHumanCamps);
+inline void ConsiderRoamGoal(Bot* owner, const int16_t index, const float baseBonus, int16_t& bestIndex, float& bestScore);
+inline int16_t FindReachableFrontierGoal(const int16_t start, const int16_t blockedGoal, const bool isZombie);
+
+inline int16_t GetHumanCampGroup(const int16_t waypoint)
+{
+	if (!IsValidWaypoint(waypoint))
+		return -1;
+
+	const Path& path = g_waypoint->m_paths[waypoint];
+	return path.mesh ? static_cast<int16_t>(path.mesh) : waypoint;
+}
+
+inline bool IsSameHumanCampGroup(const int16_t a, const int16_t b)
+{
+	if (!IsValidWaypoint(a) || !IsValidWaypoint(b))
+		return false;
+
+	return GetHumanCampGroup(a) == GetHumanCampGroup(b);
+}
+
 int16_t Bot::FindGoalZombie(void)
 {
 	if (g_waypoint->m_terrorPoints.IsEmpty())
 	{
-		m_currentGoalIndex =static_cast<int16_t>(crandomint(0, g_numWaypoints - 1));
+		m_currentGoalIndex = g_numWaypoints > 0 ? static_cast<int16_t>(crandomint(0, g_numWaypoints - 1)) : -1;
 		return m_currentGoalIndex;
 	}
 
@@ -72,6 +93,145 @@ inline float GetWaypointDistance(const int16_t &start, const int16_t &goal)
 	return GetVectorDistanceSSE(g_waypoint->m_paths[start].origin, g_waypoint->m_paths[goal].origin);
 }
 
+inline bool HasPendingFallbackGoal(const Bot* owner)
+{
+	if (!owner || !IsValidWaypoint(owner->m_currentGoalIndex) || owner->m_currentGoalIndex == owner->m_lastDeclineWaypoint || owner->m_currentGoalIndex == owner->m_currentWaypointIndex)
+		return false;
+
+	if (IsValidWaypoint(owner->m_currentWaypointIndex) && GetWaypointDistance(owner->m_currentWaypointIndex, owner->m_currentGoalIndex) < 96.0f)
+		return false;
+
+	return true;
+}
+
+inline int CountBotsUsingHumanCamp(const Bot* owner, const int16_t camp)
+{
+	int count = 0;
+	for (const Bot* bot : g_botManager->m_bots)
+	{
+		if (!bot || bot == owner || !bot->m_isAlive || bot->m_isZombieBot)
+			continue;
+
+		if (IsSameHumanCampGroup(bot->m_zhCampPointIndex, camp) || IsSameHumanCampGroup(bot->m_myMeshWaypoint, camp) || IsSameHumanCampGroup(bot->m_currentGoalIndex, camp))
+			count++;
+	}
+
+	return count;
+}
+
+inline bool IsHumanCampReachableByMatrix(const int16_t start, const int16_t goal)
+{
+	if (!IsValidWaypoint(start) || !IsValidWaypoint(goal))
+		return false;
+
+	if (!g_isMatrixReady)
+		return true;
+
+	const int16_t dist = *(g_waypoint->m_distMatrix.Get() + (start * g_numWaypoints) + goal);
+	return dist < 32766;
+}
+
+inline int16_t FindReachableFrontierGoal(const int16_t start, const int16_t blockedGoal, const bool isZombie)
+{
+	if (!IsValidWaypoint(start) || !IsValidWaypoint(blockedGoal) || !g_isMatrixReady)
+		return -1;
+
+	int16_t best = -1;
+	float bestScore = 999999999999.0f;
+	const Vector& goalOrigin = g_waypoint->m_paths[blockedGoal].origin;
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		if (i == start || i == blockedGoal)
+			continue;
+
+		const uint32_t flags = g_waypoint->m_paths[i].flags;
+		if (flags & WAYPOINT_AVOID)
+			continue;
+
+		if (isZombie && (flags & WAYPOINT_HUMANONLY))
+			continue;
+
+		if (!isZombie && (flags & (WAYPOINT_ZOMBIEONLY | WAYPOINT_DJUMP)))
+			continue;
+
+		const int16_t pathDist = *(g_waypoint->m_distMatrix.Get() + (start * g_numWaypoints) + i);
+		if (pathDist >= 32766 || pathDist <= 0)
+			continue;
+
+		const float goalDist = GetVectorDistanceSSE(g_waypoint->m_paths[i].origin, goalOrigin);
+		const float score = goalDist + static_cast<float>(pathDist) * 0.15f;
+		if (score < bestScore)
+		{
+			best = i;
+			bestScore = score;
+		}
+	}
+
+	return best;
+}
+
+inline int CountBotsUsingGoal(Bot* owner, const int16_t goal)
+{
+	int count = 0;
+	for (const Bot* bot : g_botManager->m_bots)
+	{
+		if (!bot || bot == owner || !bot->m_isAlive)
+			continue;
+
+		if (bot->m_currentGoalIndex == goal || bot->m_zhCampPointIndex == goal || bot->m_myMeshWaypoint == goal ||
+			((g_waypoint->m_paths[goal].flags & (WAYPOINT_ZMHMCAMP | WAYPOINT_HMCAMPMESH | WAYPOINT_HUMANHIGHSPOT)) &&
+				(IsSameHumanCampGroup(bot->m_currentGoalIndex, goal) || IsSameHumanCampGroup(bot->m_zhCampPointIndex, goal) || IsSameHumanCampGroup(bot->m_myMeshWaypoint, goal))))
+			count++;
+	}
+
+	return count;
+}
+
+inline void ConsiderRoamGoal(Bot* owner, const int16_t index, const float baseBonus, int16_t& bestIndex, float& bestScore)
+{
+	if (!owner || !IsValidWaypoint(index))
+		return;
+
+	if (index == owner->m_currentWaypointIndex || index == owner->m_lastDeclineWaypoint)
+		return;
+
+	if (!IsHumanCampReachableByMatrix(owner->m_currentWaypointIndex, index))
+		return;
+
+	const float dist = GetWaypointDistance(owner->m_currentWaypointIndex, index);
+	if (dist < 128.0f)
+		return;
+
+	float score = baseBonus - dist + static_cast<float>(crandomint(0, 160));
+	score -= static_cast<float>(CountBotsUsingGoal(owner, index)) * 250.0f;
+
+	if (!owner->m_isZombieBot && g_waypoint->m_paths[index].flags & (WAYPOINT_ZMHMCAMP | WAYPOINT_HMCAMPMESH))
+		score += 700.0f;
+	else if (!owner->m_isZombieBot && g_waypoint->m_paths[index].flags & WAYPOINT_HUMANHIGHSPOT)
+		score += 350.0f;
+
+	if (score > bestScore)
+	{
+		bestIndex = index;
+		bestScore = score;
+	}
+}
+
+inline int16_t FindRoamGoalForBot(Bot* owner, const bool)
+{
+	if (!owner || g_numWaypoints <= 1)
+		return -1;
+
+	int16_t bestIndex = -1;
+	float bestScore = -999999999999.0f;
+
+	for (int tries = 0; tries < 96; tries++)
+		ConsiderRoamGoal(owner, static_cast<int16_t>(crandomint(0, g_numWaypoints - 1)), 0.0f, bestIndex, bestScore);
+
+	return bestIndex;
+}
+
 int16_t Bot::FindGoalHuman(void)
 {
 	if (IsValidWaypoint(m_myMeshWaypoint))
@@ -88,66 +248,108 @@ int16_t Bot::FindGoalHuman(void)
 	{
 		if (!g_waypoint->m_zmHmPoints.IsEmpty())
 		{
-			if (g_DelayTimer < engine->GetTime())
+			float dist, score, bestScore = -999999999999.0f;
+			int16_t i, index = -1, temp;
+
+			if (m_numFriendsLeft)
 			{
-				float dist, maxDist = 999999999999.0f;
-				int16_t i, index = -1, temp;
-
-				if (m_numFriendsLeft)
+				for (i = 0; i < g_waypoint->m_zmHmPoints.Size(); i++)
 				{
-					for (i = 0; i < g_waypoint->m_zmHmPoints.Size(); i++)
+					temp = g_waypoint->m_zmHmPoints.Get(i);
+					if (temp == m_lastDeclineWaypoint || !IsHumanCampReachableByMatrix(m_currentWaypointIndex, temp))
+						continue;
+
+					dist = GetWaypointDistance(m_currentWaypointIndex, temp);
+
+					score = -dist - (static_cast<float>(CountBotsUsingHumanCamp(this, temp)) * 5000.0f);
+					if (IsEnemyReachableToPosition(g_waypoint->m_paths[temp].origin))
+						score -= 2500.0f;
+
+					score += static_cast<float>(crandomint(0, 120));
+					if (score > bestScore)
 					{
-						temp = g_waypoint->m_zmHmPoints.Get(i);
-						dist = GetWaypointDistance(m_currentWaypointIndex, temp);
-						if (dist > maxDist)
-							continue;
-
-						// bots won't left you alone like other persons in your life...
-						if (!IsFriendReachableToPosition(g_waypoint->m_paths[temp].origin))
-							continue;
-
 						index = temp;
-						maxDist = dist;
+						bestScore = score;
 					}
-
-					if (!IsValidWaypoint(index))
-					{
-						maxDist = 999999999999.0f;
-						int16_t i, temp;
-						index = -1;
-						for (i = 0; i < g_waypoint->m_zmHmPoints.Size(); i++)
-						{
-							temp = g_waypoint->m_zmHmPoints.Get(i);
-							dist = GetWaypointDistance(m_currentWaypointIndex, temp);
-							if (dist > maxDist)
-								continue;
-
-							// no friends nearby? go to safe camp spot
-							if (IsEnemyReachableToPosition(g_waypoint->m_paths[temp].origin))
-								continue;
-
-							index = temp;
-							maxDist = dist;
-						}
-				}
 				}
 
-				// if we are alone just stay to nearest
-				// theres nothing we can do...
 				if (!IsValidWaypoint(index))
 				{
-					maxDist = 999999999999.0f;
+					bestScore = -999999999999.0f;
+					index = -1;
 					for (i = 0; i < g_waypoint->m_zmHmPoints.Size(); i++)
 					{
 						temp = g_waypoint->m_zmHmPoints.Get(i);
-						dist = GetWaypointDistance(m_currentWaypointIndex, temp);
-
-						// at least get nearest camp spot
-						if (dist > maxDist)
+						if (temp == m_lastDeclineWaypoint || !IsHumanCampReachableByMatrix(m_currentWaypointIndex, temp))
 							continue;
 
+						dist = GetWaypointDistance(m_currentWaypointIndex, temp);
+
+						// no friends nearby? go to safe camp spot
+						if (IsEnemyReachableToPosition(g_waypoint->m_paths[temp].origin))
+							continue;
+
+						score = -dist - (static_cast<float>(CountBotsUsingHumanCamp(this, temp)) * 5000.0f) + static_cast<float>(crandomint(0, 120));
+						if (score > bestScore)
+						{
+							index = temp;
+							bestScore = score;
+						}
+					}
+				}
+			}
+
+			// if we are alone, prefer a reachable and less crowded camp instead of idling around spawn.
+			if (!IsValidWaypoint(index))
+			{
+				bestScore = -999999999999.0f;
+				for (i = 0; i < g_waypoint->m_zmHmPoints.Size(); i++)
+				{
+					temp = g_waypoint->m_zmHmPoints.Get(i);
+					if (temp == m_lastDeclineWaypoint || !IsHumanCampReachableByMatrix(m_currentWaypointIndex, temp))
+						continue;
+
+					dist = GetWaypointDistance(m_currentWaypointIndex, temp);
+
+					score = -dist - (static_cast<float>(CountBotsUsingHumanCamp(this, temp)) * 5000.0f);
+					if (IsEnemyReachableToPosition(g_waypoint->m_paths[temp].origin))
+						score -= 2500.0f;
+
+					score += static_cast<float>(crandomint(0, 120));
+					if (score > bestScore)
+					{
 						index = temp;
-						maxDist = dist;
+						bestScore = score;
+					}
+				}
+			}
+
+			if (IsValidWaypoint(index))
+			{
+				m_currentGoalIndex = index;
+				return m_currentGoalIndex;
+			}
+
+			if (!g_waypoint->m_hmHighSpotPoints.IsEmpty())
+			{
+				bestScore = -999999999999.0f;
+				index = -1;
+				for (i = 0; i < g_waypoint->m_hmHighSpotPoints.Size(); i++)
+				{
+					temp = g_waypoint->m_hmHighSpotPoints.Get(i);
+					if (temp == m_lastDeclineWaypoint || !IsHumanCampReachableByMatrix(m_currentWaypointIndex, temp))
+						continue;
+
+					dist = GetWaypointDistance(m_currentWaypointIndex, temp);
+					score = -1000.0f - dist - (static_cast<float>(CountBotsUsingHumanCamp(this, temp)) * 2500.0f);
+					if (IsEnemyReachableToPosition(g_waypoint->m_paths[temp].origin))
+						score -= 2500.0f;
+
+					score += static_cast<float>(crandomint(0, 120));
+					if (score > bestScore)
+					{
+						index = temp;
+						bestScore = score;
 					}
 				}
 
@@ -156,17 +358,13 @@ int16_t Bot::FindGoalHuman(void)
 					m_currentGoalIndex = index;
 					return m_currentGoalIndex;
 				}
-				else
-				{
-					m_currentGoalIndex = g_waypoint->m_zmHmPoints.Random();
-					return m_currentGoalIndex;
-				}
 			}
-			else
-			{
-				m_currentGoalIndex = g_waypoint->m_zmHmPoints.Random();
+
+			if (HasPendingFallbackGoal(this))
 				return m_currentGoalIndex;
-			}
+
+			m_currentGoalIndex = g_waypoint->m_zmHmPoints.Random();
+			return m_currentGoalIndex;
 		}
 		else
 		{
@@ -175,7 +373,38 @@ int16_t Bot::FindGoalHuman(void)
 		}
 	}
 
-	m_currentGoalIndex = IsValidWaypoint(m_currentWaypointIndex) ? m_currentWaypointIndex : -1;
+	if (!g_waypoint->m_hmHighSpotPoints.IsEmpty())
+	{
+		float dist, score, bestScore = -999999999999.0f;
+		int16_t i, index = -1, temp;
+		for (i = 0; i < g_waypoint->m_hmHighSpotPoints.Size(); i++)
+		{
+			temp = g_waypoint->m_hmHighSpotPoints.Get(i);
+			if (temp == m_lastDeclineWaypoint || !IsHumanCampReachableByMatrix(m_currentWaypointIndex, temp))
+				continue;
+
+			dist = GetWaypointDistance(m_currentWaypointIndex, temp);
+			score = -1000.0f - dist - (static_cast<float>(CountBotsUsingHumanCamp(this, temp)) * 2500.0f) + static_cast<float>(crandomint(0, 120));
+			if (score > bestScore)
+			{
+				index = temp;
+				bestScore = score;
+			}
+		}
+
+		if (IsValidWaypoint(index))
+		{
+			m_currentGoalIndex = index;
+			return m_currentGoalIndex;
+		}
+	}
+
+	if (HasPendingFallbackGoal(this))
+		return m_currentGoalIndex;
+
+	m_currentGoalIndex = FindRoamGoalForBot(this, true);
+	if (!IsValidWaypoint(m_currentGoalIndex))
+		m_currentGoalIndex = g_numWaypoints > 0 ? static_cast<int16_t>(crandomint(0, g_numWaypoints - 1)) : -1;
 	return m_currentGoalIndex;
 }
 
@@ -212,6 +441,13 @@ void Bot::FollowPath(void)
 void Bot::DoWaypointNav(void)
 {
 	m_destOrigin = m_waypointOrigin;
+
+	if (m_waypoint.flags & WAYPOINT_LADDER || IsOnLadder())
+	{
+		m_currentTravelFlags &= ~PATHFLAG_JUMP;
+		m_buttons &= ~IN_JUMP;
+		m_duckTime = engine->GetTime() + 0.25f;
+	}
 
 	// check if there is a breakable entity blocking our jump path
 	if (m_currentTravelFlags & PATHFLAG_JUMP || m_waypoint.flags & WAYPOINT_JUMP)
@@ -339,7 +575,8 @@ void Bot::DoWaypointNav(void)
 		pev->velocity.z = Vz;
 
 		m_duckTime = engine->GetTime() + 1.25f;
-		m_buttons |= (IN_DUCK | IN_JUMP);
+		m_buttons |= (IN_FORWARD | IN_DUCK | IN_JUMP);
+		m_moveSpeed = pev->maxspeed;
 		m_jumpReady = false;
 		m_waitForLanding = true;
 		return;
@@ -2035,7 +2272,25 @@ void Bot::FindPath(int16_t &srcIndex, int16_t &destIndex)
 			}
 		}
 		else
+		{
+			const int16_t frontier = FindReachableFrontierGoal(srcIndex, destIndex, m_isZombieBot);
+			if (IsValidWaypoint(frontier))
+			{
+				g_asyncPathfinder.RequestPath(m_index, srcIndex, frontier, m_isZombieBot, m_personality, pev->gravity, m_team, false, -1, false);
+				return;
+			}
+
+			if (isHumanCampPath)
+			{
+				m_lastDeclineWaypoint = destIndex;
+				if (destIndex == m_zhCampPointIndex)
+					m_zhCampPointIndex = -1;
+				if (destIndex == m_myMeshWaypoint)
+					m_myMeshWaypoint = -1;
+				m_currentGoalIndex = -1;
+			}
 			m_navNode.Clear();
+		}
 
 		return;
 	}
@@ -2371,80 +2626,6 @@ void Bot::CheckTouchEntity(edict_t *entity)
 
 			const float time2 = engine->GetTime();
 			SetProcess(Process::DestroyBreakable, "trying to destroy a breakable", false, time2 + 60.0f);
-
-			if (pev->origin.z > m_breakableOrigin.z) // make bots smarter
-			{
-				// tell my enemies to destroy it, so i will fall
-				if (IsBreakable(entity))
-				{
-					edict_t *ent;
-					for (const auto &enemy : g_botManager->m_bots)
-					{
-						if (!enemy)
-							continue;
-
-						if (m_team == enemy->m_team)
-							continue;
-
-						if (!enemy->m_isAlive)
-							continue;
-
-						if (enemy->m_isZombieBot)
-							continue;
-
-						if (enemy->m_currentWeapon == Weapon::Knife)
-							continue;
-
-						ent = enemy->GetEntity();
-						if (FNullEnt(ent))
-							continue;
-
-						TraceHull(enemy->EyePosition(), m_breakableOrigin, TraceIgnore::Nothing, point_hull, ent, &tr);
-						TraceHull(ent->v.origin, m_breakableOrigin, TraceIgnore::Nothing, head_hull, ent, &tr2);
-						if ((!FNullEnt(tr.pHit) && tr.pHit == entity) || (!FNullEnt(tr2.pHit) && tr2.pHit == entity))
-						{
-							enemy->m_breakableEntity = entity;
-							enemy->m_breakableOrigin = m_breakableOrigin;
-							enemy->SetProcess(Process::DestroyBreakable, "trying to destroy a breakable to force enemy fall", false, time2 + 60.0f);
-						}
-					}
-				}
-			}
-			else if (!m_isZombieBot) // tell my friends to destroy it
-			{
-				edict_t *ent;
-				for (Bot *const &bot : g_botManager->m_bots)
-				{
-					if (!bot)
-						continue;
-
-					if (m_team != bot->m_team)
-						continue;
-
-					if (!bot->m_isAlive)
-						continue;
-
-					if (bot->m_isZombieBot)
-						continue;
-
-					ent = bot->GetEntity();
-					if (FNullEnt(ent))
-						continue;
-
-					if (GetEntity() == ent)
-						continue;
-
-					TraceHull(bot->EyePosition(), m_breakableOrigin, TraceIgnore::Nothing, point_hull, ent, &tr);
-					TraceHull(ent->v.origin, m_breakableOrigin, TraceIgnore::Nothing, head_hull, ent, &tr2);
-
-					if ((!FNullEnt(tr.pHit) && tr.pHit == entity) || (!FNullEnt(tr2.pHit) && tr2.pHit == entity))
-					{
-						bot->m_breakableEntity = entity;
-						bot->m_breakableOrigin = m_breakableOrigin;
-						bot->SetProcess(Process::DestroyBreakable, "trying to help my friend for destroy a breakable", false, time2 + 60.0f);
-					}
-				}
-			}
 		}
 	}
 }
@@ -2738,6 +2919,14 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 		if (m_hasFriendsNear && !ebot_has_semiclip.GetBool() && !FNullEnt(m_nearestFriend))
 		{
 			m_avoid = nullptr;
+			const Bot *friendBot = g_botManager->GetBot(m_nearestFriend);
+			const bool friendIsStationaryCamper = friendBot && !friendBot->m_isZombieBot && !friendBot->m_navNode.HasNext() &&
+				(friendBot->m_currentWaypointIndex == friendBot->m_zhCampPointIndex || friendBot->m_currentWaypointIndex == friendBot->m_myMeshWaypoint) &&
+				friendBot->pev->velocity.GetLengthSquared2D() < squaredf(8.0f);
+
+			if (friendIsStationaryCamper)
+				return;
+
 			const int prio = GetPlayerPriority(GetEntity());
 			const int friendPrio = GetPlayerPriority(m_nearestFriend);
 
@@ -2745,7 +2934,6 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 				m_avoid = m_nearestFriend;
 			else
 			{
-				const Bot *friendBot = g_botManager->GetBot(m_nearestFriend);
 				if (friendBot && !FNullEnt(friendBot->m_avoid) && GetEntity() != friendBot->m_avoid && friendPrio > GetPlayerPriority(friendBot->m_avoid))
 					m_avoid = friendBot->m_avoid;
 			}
@@ -3548,13 +3736,23 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 						if (pev->maxspeed < 20.0f)
 							break;
 
+						if (onLadder || m_waypoint.flags & WAYPOINT_LADDER)
+						{
+							m_buttons |= IN_DUCK;
+							m_buttons &= ~IN_JUMP;
+							break;
+						}
+
 						if (m_isZombieBot && isDucking)
 						{
 							m_moveSpeed = pev->maxspeed;
 							m_buttons = IN_FORWARD;
 						}
 						else
-							m_buttons |= (IN_DUCK | IN_JUMP);
+						{
+							m_buttons |= (IN_FORWARD | IN_DUCK | IN_JUMP);
+							m_moveSpeed = pev->maxspeed;
+						}
 
 						break;
 					}

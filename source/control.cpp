@@ -31,8 +31,8 @@ ConVar ebot_difficulty("ebot_difficulty", "4");
 ConVar ebot_minskill("ebot_min_skill", "1");
 ConVar ebot_maxskill("ebot_max_skill", "100");
 
-ConVar ebot_nametag("ebot_name_tag", "2");
-ConVar ebot_ping("ebot_fake_ping", "0");
+ConVar ebot_nametag("ebot_name_tag", "0");
+ConVar ebot_ping("ebot_fake_ping", "1");
 ConVar ebot_display_avatar("ebot_display_avatar", "0");
 
 ConVar ebot_keep_slots("ebot_keep_slots", "1");
@@ -994,13 +994,8 @@ void Bot::NewRound(void)
 	m_prevWptIndex[3] = -1;
 	FindWaypoint();
 
-	if (!g_waypoint->m_zmHmPoints.IsEmpty())
-	{
-		m_zhCampPointIndex = g_waypoint->m_zmHmPoints.Random();
-		m_currentGoalIndex = m_zhCampPointIndex;
-	}
-	else
-		m_zhCampPointIndex = -1;
+	m_zhCampPointIndex = -1;
+	m_currentGoalIndex = -1;
 	m_myMeshWaypoint = -1;
 
 	m_hasEnemiesNear = false;

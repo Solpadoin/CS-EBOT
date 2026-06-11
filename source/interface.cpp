@@ -2934,12 +2934,19 @@ C_DLLEXPORT void Amxx_EBotSetEnemy(int index, int ent)
 	if (amxxbot)
 	{
 		edict_t* amxxent = INDEXENT(ent);
-		if (!FNullEnt(amxxent))
+		if (!FNullEnt(amxxent) && IsAlive(amxxent) && amxxbot->m_isZombieBot != IsZombieEntity(amxxent))
 		{
 			amxxbot->m_hasEnemiesNear = true;
 			amxxbot->m_nearestEnemy = amxxent;
 			if (amxxbot->pev)
 				amxxbot->m_enemyDistance = GetVectorDistanceSSE(amxxbot->pev->origin, amxxent->v.origin);
+		}
+		else
+		{
+			amxxbot->m_hasEnemiesNear = false;
+			amxxbot->m_nearestEnemy = nullptr;
+			amxxbot->m_isEnemyReachable = false;
+			amxxbot->m_enemyDistance = 999999.0f;
 		}
 	}
 }
@@ -2968,12 +2975,18 @@ C_DLLEXPORT void Amxx_EBotSetFriend(int index, int ent)
 	if (amxxbot)
 	{
 		edict_t* amxxent = INDEXENT(ent);
-		if (!FNullEnt(amxxent))
+		if (!FNullEnt(amxxent) && IsAlive(amxxent) && amxxbot->m_isZombieBot == IsZombieEntity(amxxent))
 		{
 			amxxbot->m_hasFriendsNear = true;
 			amxxbot->m_nearestFriend = amxxent;
 			if (amxxbot->pev)
 				amxxbot->m_friendDistance = GetVectorDistanceSSE(amxxbot->pev->origin, amxxent->v.origin);
+		}
+		else
+		{
+			amxxbot->m_hasFriendsNear = false;
+			amxxbot->m_nearestFriend = nullptr;
+			amxxbot->m_friendDistance = 999999.0f;
 		}
 	}
 }
@@ -3331,7 +3344,58 @@ C_DLLEXPORT void Amxx_EBotSetZombie(int index, int zombie)
 	index--;
 	Bot* amxxbot = g_botManager->GetBot(index);
 	if (amxxbot)
-		amxxbot->m_isZombieBot = static_cast<bool>(zombie);
+	{
+		const bool newZombieState = static_cast<bool>(zombie);
+		const bool changed = amxxbot->m_isZombieBot != newZombieState;
+
+		amxxbot->m_isZombieBot = newZombieState;
+		amxxbot->m_team = GetTeam(amxxbot->GetEntity());
+
+		if (changed)
+		{
+			amxxbot->FinishCurrentProcess("zombie state changed");
+			amxxbot->m_navNode.Clear();
+			amxxbot->m_currentGoalIndex = -1;
+			amxxbot->m_zhCampPointIndex = -1;
+			amxxbot->m_myMeshWaypoint = -1;
+			amxxbot->m_lastDeclineWaypoint = -1;
+
+			amxxbot->m_nearestEnemy = nullptr;
+			amxxbot->m_nearestFriend = nullptr;
+			amxxbot->m_nearestEntity = nullptr;
+			amxxbot->m_hasEnemiesNear = false;
+			amxxbot->m_hasFriendsNear = false;
+			amxxbot->m_hasEntitiesNear = false;
+			amxxbot->m_isEnemyReachable = false;
+
+			amxxbot->m_breakableEntity = nullptr;
+			amxxbot->m_breakableOrigin = nullvec;
+			amxxbot->m_buttonEntity = nullptr;
+			amxxbot->m_avoid = nullptr;
+			amxxbot->m_waiting = nullptr;
+			amxxbot->m_pauseTime = 0.0f;
+			amxxbot->ResetStuck();
+
+			edict_t* changedEnt = amxxbot->GetEntity();
+			for (Bot* const& bot : g_botManager->m_bots)
+			{
+				if (!bot || bot == amxxbot || !bot->m_isAlive)
+					continue;
+
+				if (bot->m_nearestEnemy == changedEnt || bot->m_nearestFriend == changedEnt)
+				{
+					bot->m_nearestEnemy = nullptr;
+					bot->m_nearestFriend = nullptr;
+					bot->m_hasEnemiesNear = false;
+					bot->m_hasFriendsNear = false;
+					bot->m_isEnemyReachable = false;
+
+					if (bot->m_isZombieBot)
+						bot->m_navNode.Clear();
+				}
+			}
+		}
+	}
 }
 
 C_DLLEXPORT int Amxx_EBotIsAlive(int index)
@@ -3494,7 +3558,11 @@ C_DLLEXPORT void Amxx_EBotSetGoalWaypoint(int index, int waypoint)
 	index--;
 	Bot* amxxbot = g_botManager->GetBot(index);
 	if (amxxbot)
-		amxxbot->m_zhCampPointIndex = amxxbot->m_currentGoalIndex = static_cast<int16_t>(waypoint);
+	{
+		amxxbot->m_currentGoalIndex = static_cast<int16_t>(waypoint);
+		if (!amxxbot->m_isZombieBot)
+			amxxbot->m_zhCampPointIndex = amxxbot->m_currentGoalIndex;
+	}
 }
 
 C_DLLEXPORT int Amxx_EBotGetCampWaypoint(int index)
@@ -3621,7 +3689,7 @@ C_DLLEXPORT int Amxx_EBotIsCamping(int index)
 {
 	index--;
 	Bot* amxxbot = g_botManager->GetBot(index);
-	if (amxxbot && (amxxbot->m_currentWaypointIndex == amxxbot->m_zhCampPointIndex || amxxbot->m_currentWaypointIndex == amxxbot->m_myMeshWaypoint))
+	if (amxxbot && !amxxbot->m_isZombieBot && (amxxbot->m_currentWaypointIndex == amxxbot->m_zhCampPointIndex || amxxbot->m_currentWaypointIndex == amxxbot->m_myMeshWaypoint))
 		return 1;
 
 	return 0;
