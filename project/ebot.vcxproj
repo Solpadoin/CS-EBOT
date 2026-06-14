@@ -119,7 +119,7 @@
 	  <OptimizeForWindowsApplication>true</OptimizeForWindowsApplication>
 	  <BuildStlModules>false</BuildStlModules>
 	  <GuardEHContMetadata>false</GuardEHContMetadata>
-	  <SupportJustMyCode>true</SupportJustMyCode>
+	  <SupportJustMyCode>false</SupportJustMyCode>
 	  <AdditionalOptions>/guard:cf- /clang:-mstackrealign %(AdditionalOptions)</AdditionalOptions>
 	</ClCompile>
 	<ResourceCompile>
@@ -146,8 +146,7 @@
 	  <OptimizeReferences>true</OptimizeReferences>
 	  <EnableCOMDATFolding>true</EnableCOMDATFolding>
 	  <SetChecksum>false</SetChecksum>
-	  <RandomizedBaseAddress>
-	  </RandomizedBaseAddress>
+	  <RandomizedBaseAddress>false</RandomizedBaseAddress>
 	  <DataExecutionPrevention>false</DataExecutionPrevention>
 	  <TurnOffAssemblyGeneration>false</TurnOffAssemblyGeneration>
 	  <ImportLibrary>.\ebot_release\inf\ebot.lib</ImportLibrary>
@@ -165,10 +164,11 @@
 	  <EnableUAC>false</EnableUAC>
 	  <AllowIsolation>false</AllowIsolation>
 	  <PreventDllBinding>true</PreventDllBinding>
-	  <AdditionalOptions>/guard:no %(AdditionalOptions)</AdditionalOptions>
+	  <AdditionalOptions>/DYNAMICBASE:NO /GUARD:NO %(AdditionalOptions)</AdditionalOptions>
 	</Link>
 	<PostBuildEvent>
-	  <Command>powershell -NoProfile -ExecutionPolicy Bypass -File "$(ProjectDir)FixGuardFlags.ps1" "$(TargetPath)"</Command>
+	  <Command>
+	  </Command>
 	</PostBuildEvent>
 	<Manifest>
 	  <SuppressDependencyElement>true</SuppressDependencyElement>
@@ -225,7 +225,6 @@
 	  <LanguageStandard_C>stdc11</LanguageStandard_C>
 	  <EnableEnhancedInstructionSet>StreamingSIMDExtensions2</EnableEnhancedInstructionSet>
 	  <FloatingPointExceptions>false</FloatingPointExceptions>
-	  <GuardEHContMetadata>false</GuardEHContMetadata>
 	  <AdditionalOptions>/clang:-mstackrealign %(AdditionalOptions)</AdditionalOptions>
 	</ClCompile>
 	<ResourceCompile>

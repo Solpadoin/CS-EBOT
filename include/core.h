@@ -1061,6 +1061,8 @@ public:
 	void AddHighSpotPoints(void);
 	void AssignHumanCampGroups(void);
 	void ConnectReachableGaps(void);
+	void RunManualPreprocess(void);
+	void AutoGeneratePaths(void);
 	void NormalizeLadderFlags(void);
 	void AddPath(const int16_t addIndex, const int16_t pathIndex,const int type = 0);
 
@@ -1075,6 +1077,8 @@ public:
 	void FindInRadius(CArray<int16_t> &queueID, const float &radius, const Vector &origin);
 
 	void Add(const int flags, const Vector &waypointOrigin = nullvec, const float analyzeRange = 128.0f);
+	int16_t AddManualWaypoint(const Vector &waypointOrigin);
+	void ToggleFlagsToNearest(uint32_t flags, float radius = 75.0f);
 	void Delete(void);
 	void DeleteByIndex(int16_t index);
 	void ToggleFlags(int toggleFlag);

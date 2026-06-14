@@ -469,8 +469,9 @@ void Bot::DoWaypointNav(void)
 		}
 	}
 
-	// check if this is a consecutive/mid-air jump (double-jump / air-dash)
-	if ((m_jumpReady && !m_waitForLanding && (IsOnFloor() || IsOnLadder())) || (m_jumpReady && m_waitForLanding && !IsOnFloor() && !IsOnLadder() && !IsInWater()))
+	const float now = engine->GetTime();
+	const bool canStartJump = m_jumpReady && !m_waitForLanding && (IsOnFloor() || IsOnLadder() || IsInWater()) && m_jumpTime + 0.45f < now;
+	if (canStartJump)
 	{
 		const Vector myOrigin = GetBottomOrigin(GetEntity());
 		Vector waypointOrigin = m_waypoint.origin; // directly jump to waypoint, ignore risk of fall
@@ -549,6 +550,9 @@ void Bot::DoWaypointNav(void)
 			}
 		}
 
+		if (Vz > 285.0f)
+			Vz = 285.0f;
+
 		// solve quadratic formula for exact time of flight: T = (Vz + sqrt(Vz^2 - 2 * g * dz)) / g
 		// the term inside sqrt is guaranteed to be >= 0 because Vz >= sqrt(2 * g * dz)
 		float timeOfFlight = 0.5f;
@@ -577,6 +581,7 @@ void Bot::DoWaypointNav(void)
 		m_duckTime = engine->GetTime() + 1.25f;
 		m_buttons |= (IN_FORWARD | IN_DUCK | IN_JUMP);
 		m_moveSpeed = pev->maxspeed;
+		m_jumpTime = now;
 		m_jumpReady = false;
 		m_waitForLanding = true;
 		return;
@@ -638,8 +643,11 @@ void Bot::DoWaypointNav(void)
 				else
 				{
 					MoveTo(center, false);
-					if (IsOnFloor() && pev->velocity.GetLength2D() < (pev->maxspeed * 0.5f))
+					if (IsOnFloor() && m_jumpTime + 0.45f < engine->GetTime() && pev->velocity.GetLength2D() < (pev->maxspeed * 0.5f))
+					{
 						m_buttons |= IN_JUMP;
+						m_jumpTime = engine->GetTime();
+					}
 				}
 			}
 			else
@@ -3392,7 +3400,14 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 			m_wasStuck = true;
 
 			if (m_stuckTime > 45.0f)
-				Kill();
+			{
+				if (IsValidWaypoint(m_currentWaypointIndex))
+					m_lastDeclineWaypoint = m_currentWaypointIndex;
+
+				FindWaypoint();
+				FindPath(m_currentWaypointIndex, (!m_isZombieBot && IsValidWaypoint(m_zhCampPointIndex)) ? m_zhCampPointIndex : m_currentGoalIndex);
+				ResetStuck();
+			}
 			else if (m_stuckTime > 7.0f && m_isSlowThink)
 			{
 				if (IsValidWaypoint(m_currentWaypointIndex))
@@ -3750,7 +3765,14 @@ void Bot::CheckStuck(const Vector &directionNormal, const float finterval)
 						}
 						else
 						{
-							m_buttons |= (IN_FORWARD | IN_DUCK | IN_JUMP);
+							if (onFloor && m_jumpTime + 0.45f < time2)
+							{
+								m_buttons |= (IN_FORWARD | IN_DUCK | IN_JUMP);
+								m_jumpTime = time2;
+							}
+							else
+								m_buttons |= (IN_FORWARD | IN_DUCK);
+
 							m_moveSpeed = pev->maxspeed;
 						}
 
@@ -4418,7 +4440,10 @@ void Bot::SetStrafeSpeed(const Vector &moveDir, const float strafeSpeed)
 
 		m_strafeSpeed = m_tempstrafeSpeed;
 		if ((m_isStuck || pev->speed >= pev->maxspeed) && IsOnFloor() && !IsOnLadder() && m_jumpTime + 5.0f < engine->GetTime() && CanJumpUp(moveDir))
+		{
 			m_buttons |= IN_JUMP;
+			m_jumpTime = engine->GetTime();
+		}
 	}
 	else if (((moveDir - pev->origin).Normalize2D() | g_pGlobals->v_forward.SkipZ()) > 0.0f && !CheckWallOnRight())
 		m_strafeSpeed = strafeSpeed;

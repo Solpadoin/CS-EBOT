@@ -92,7 +92,7 @@ plugin_info_t Plugin_info =
 	 PRODUCT_AUTHOR, // plugin author
 	 PRODUCT_URL, // plugin URL
 	 PRODUCT_LOGTAG, // plugin logtag
-	 PT_STARTUP, // when loadable
+	 PT_ANYTIME, // when loadable
 	 PT_NEVER, // when unloadable
 };
 
@@ -156,7 +156,7 @@ FireDelay g_fireDelay[Const_NumWeapons + 1] =
 };
 
 // bot menus
-MenuText g_menus[28] =
+MenuText g_menus[29] =
 {
 	// main menu
 	{
@@ -494,6 +494,22 @@ MenuText g_menus[28] =
 		"\v\v"
 		"8. Previous...\v"
 		"9. Next...\v\v"
+		"0. Exit"
+	},
+
+	// simplified zombie-mode waypoint editor
+	{
+		0x3ff,
+		"\\yBot Waypoints\\w\v\v"
+		"1. Add Waypoint\v"
+		"2. Delete Waypoint\v"
+		"3. Mark as Human Camp/Remove\v"
+		"4. Mark as Zombie Rush/Remove\v"
+		"5. Mark as Crouch/Remove\v"
+		"6. Mark as Fallcheck/Remove\v"
+		"7. Mark as Jump/Remove\v"
+		"8. Save & Run Preproc\v"
+		"9. Autogenerate Paths\v\v"
 		"0. Exit"
 	}
 };

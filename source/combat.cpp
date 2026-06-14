@@ -506,8 +506,11 @@ void Bot::KnifeAttack(void)
 		else
 		{
 			m_duckTime = 0.0f;
-			if (IsOnFloor() && chanceof(15) && pev->origin.z + 150.0f < entityOrigin.z && distanceSkipZ < squaredf(300.0f))
+			if (IsOnFloor() && m_jumpTime + 0.45f < engine->GetTime() && chanceof(15) && pev->origin.z + 150.0f < entityOrigin.z && distanceSkipZ < squaredf(300.0f))
+			{
 				m_buttons |= IN_JUMP;
+				m_jumpTime = engine->GetTime();
+			}
 		}
 
 		if (kaMode == 1)

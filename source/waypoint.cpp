@@ -1357,6 +1357,183 @@ void Waypoint::Add(const int flags, const Vector& waypointOrigin, const float an
 	CalculateWayzone(index); // calculate the wayzone of this waypoint
 }
 
+static CArray<int16_t> g_manualHumanCampPoints;
+static CArray<int16_t> g_manualZombieRushPoints;
+static CArray<int16_t> g_manualCrouchPoints;
+static CArray<int16_t> g_manualFallcheckPoints;
+static CArray<int16_t> g_manualJumpPoints;
+static CArray<int16_t> g_manualNoCrouchPoints;
+static CArray<int16_t> g_manualNoFallcheckPoints;
+static CArray<int16_t> g_manualNoJumpPoints;
+
+static void PushUniqueManualPoint(CArray<int16_t>& points, const int16_t index)
+{
+	for (int16_t i = 0; i < points.Size(); i++)
+	{
+		if (points[i] == index)
+			return;
+	}
+
+	points.Push(index);
+}
+
+static void RemoveManualPoint(CArray<int16_t>& points, const int16_t index)
+{
+	while (points.Remove(index))
+	{
+	}
+}
+
+static void AdjustManualPointsAfterDelete(CArray<int16_t>& points, const int16_t index)
+{
+	for (int16_t i = 0; i < points.Size(); i++)
+	{
+		if (points[i] == index)
+		{
+			points.RemoveAt(i);
+			i--;
+			continue;
+		}
+
+		if (points[i] > index)
+			points[i]--;
+	}
+}
+
+static void ClearManualJumpConnections(Path& path)
+{
+	for (int8_t slot = 0; slot < Const_MaxPathIndex; slot++)
+		path.connectionFlags[slot] &= ~PATHFLAG_JUMP;
+}
+
+static bool HasManualJumpConnection(const Path& path)
+{
+	for (int8_t slot = 0; slot < Const_MaxPathIndex; slot++)
+	{
+		if (path.index[slot] != -1 && (path.connectionFlags[slot] & PATHFLAG_JUMP))
+			return true;
+	}
+
+	return false;
+}
+
+static void SetNearestConnectionJump(Path& path, const Vector& origin, CArray<Path>& paths)
+{
+	int8_t bestSlot = -1;
+	float bestDistance = 9999999.0f;
+
+	for (int8_t slot = 0; slot < Const_MaxPathIndex; slot++)
+	{
+		if (path.index[slot] == -1)
+			continue;
+
+		const float distance = (paths[path.index[slot]].origin - origin).GetLengthSquared();
+		if (distance < bestDistance)
+		{
+			bestDistance = distance;
+			bestSlot = slot;
+		}
+	}
+
+	if (bestSlot != -1)
+		path.connectionFlags[bestSlot] |= PATHFLAG_JUMP;
+}
+
+int16_t Waypoint::AddManualWaypoint(const Vector& waypointOrigin)
+{
+	const int16_t before = g_numWaypoints;
+	Add(0, waypointOrigin, 128.0f);
+	if (g_numWaypoints <= before)
+		return -1;
+
+	const int16_t index = static_cast<int16_t>(g_numWaypoints - 1);
+	m_paths[index].radius = 35;
+	g_waypointsChanged = true;
+	return index;
+}
+
+void Waypoint::ToggleFlagsToNearest(const uint32_t flags, const float radius)
+{
+	if (FNullEnt(g_hostEntity))
+		return;
+
+	const int16_t index = FindNearestSlow(GetEntityOrigin(g_hostEntity), radius);
+	if (!IsValidWaypoint(index))
+		return;
+
+	const bool remove = (m_paths[index].flags & flags) != 0;
+	if (remove)
+		m_paths[index].flags &= ~flags;
+	else
+		m_paths[index].flags |= flags;
+
+	if (flags & WAYPOINT_ZMHMCAMP)
+	{
+		if (remove)
+			RemoveManualPoint(g_manualHumanCampPoints, index);
+		else
+			PushUniqueManualPoint(g_manualHumanCampPoints, index);
+	}
+
+	if (flags & WAYPOINT_ZOMBIEPUSH)
+	{
+		if (remove)
+			RemoveManualPoint(g_manualZombieRushPoints, index);
+		else
+			PushUniqueManualPoint(g_manualZombieRushPoints, index);
+	}
+
+	if (flags & WAYPOINT_CROUCH)
+	{
+		if (remove)
+		{
+			RemoveManualPoint(g_manualCrouchPoints, index);
+			PushUniqueManualPoint(g_manualNoCrouchPoints, index);
+		}
+		else
+		{
+			PushUniqueManualPoint(g_manualCrouchPoints, index);
+			RemoveManualPoint(g_manualNoCrouchPoints, index);
+		}
+	}
+
+	if (flags & WAYPOINT_FALLCHECK)
+	{
+		if (remove)
+		{
+			RemoveManualPoint(g_manualFallcheckPoints, index);
+			PushUniqueManualPoint(g_manualNoFallcheckPoints, index);
+		}
+		else
+		{
+			PushUniqueManualPoint(g_manualFallcheckPoints, index);
+			RemoveManualPoint(g_manualNoFallcheckPoints, index);
+		}
+	}
+
+	if (flags & WAYPOINT_JUMP)
+	{
+		const bool removeJump = g_manualJumpPoints.Has(index) || ((m_paths[index].flags & WAYPOINT_JUMP) && !g_manualNoJumpPoints.Has(index)) || HasManualJumpConnection(m_paths[index]);
+		if (removeJump)
+		{
+			m_paths[index].flags &= ~WAYPOINT_JUMP;
+			RemoveManualPoint(g_manualJumpPoints, index);
+			PushUniqueManualPoint(g_manualNoJumpPoints, index);
+			ClearManualJumpConnections(m_paths[index]);
+		}
+		else
+		{
+			m_paths[index].flags |= WAYPOINT_JUMP;
+			PushUniqueManualPoint(g_manualJumpPoints, index);
+			RemoveManualPoint(g_manualNoJumpPoints, index);
+			SetNearestConnectionJump(m_paths[index], m_paths[index].origin, m_paths);
+		}
+	}
+
+	PlaySound(g_hostEntity, "common/wpn_hudon.wav");
+	g_waypointsChanged = true;
+}
+
 void Waypoint::Delete(void)
 {
 	const int16_t index = FindNearestSlow(GetEntityOrigin(g_hostEntity), 75.0f);
@@ -1449,10 +1626,23 @@ void Waypoint::DeleteByIndex(const int16_t index)
 		}
 	}
 
+	AdjustManualPointsAfterDelete(g_manualHumanCampPoints, index);
+	AdjustManualPointsAfterDelete(g_manualZombieRushPoints, index);
+	AdjustManualPointsAfterDelete(g_manualCrouchPoints, index);
+	AdjustManualPointsAfterDelete(g_manualFallcheckPoints, index);
+	AdjustManualPointsAfterDelete(g_manualJumpPoints, index);
+	AdjustManualPointsAfterDelete(g_manualNoCrouchPoints, index);
+	AdjustManualPointsAfterDelete(g_manualNoFallcheckPoints, index);
+	AdjustManualPointsAfterDelete(g_manualNoJumpPoints, index);
+
 	EraseFromBucket(m_paths[index].origin, index);
 	m_paths.RemoveAt(index);
 
 	g_numWaypoints--;
+	DestroyBuckets();
+	for (i = 0; i < g_numWaypoints; i++)
+		AddToBucket(m_paths[i].origin, i);
+
 	if (m_waypointDisplayTime.IsAllocated())
 		m_waypointDisplayTime[index] = 0.0f;
 
@@ -2200,6 +2390,923 @@ void Waypoint::ConnectReachableGaps(void)
 	}
 }
 
+static bool IsManualPointInArray(CArray<int16_t>& points, const int16_t index)
+{
+	for (int16_t i = 0; i < points.Size(); i++)
+	{
+		if (points[i] == index)
+			return true;
+	}
+
+	return false;
+}
+
+static bool IsManualEntityInRadius(edict_t* ent, const Vector& origin, const float radius)
+{
+	if (FNullEnt(ent))
+		return false;
+
+	Vector closest = origin;
+	closest.x = cclamp(closest.x, ent->v.absmin.x, ent->v.absmax.x);
+	closest.y = cclamp(closest.y, ent->v.absmin.y, ent->v.absmax.y);
+	closest.z = cclamp(closest.z, ent->v.absmin.z, ent->v.absmax.z);
+
+	return (closest - origin).GetLengthSquared() <= squaredf(radius);
+}
+
+static bool HasManualNearEntity(const Vector& origin, const char* classname, const float radius)
+{
+	edict_t* ent = nullptr;
+	while (!FNullEnt(ent = FIND_ENTITY_BY_CLASSNAME(ent, classname)))
+	{
+		if (IsManualEntityInRadius(ent, origin, radius))
+			return true;
+	}
+
+	return false;
+}
+
+static bool IsManualWalkableEntity(edict_t* ent, bool& door)
+{
+	if (FNullEnt(ent))
+		return false;
+
+	if (FClassnameIs(ent, "func_door") || FClassnameIs(ent, "func_door_rotating"))
+	{
+		door = true;
+		return true;
+	}
+
+	return FClassnameIs(ent, "func_breakable") && ent->v.takedamage != DAMAGE_NO;
+}
+
+static bool ManualTraceLineClear(const Vector& from, const Vector& to, bool& door)
+{
+	TraceResult tr;
+	edict_t* ignore = g_hostEntity;
+	edict_t* previous = g_hostEntity;
+	Vector traceFrom = from;
+	const Vector dir = (to - from).Normalize();
+
+	for (int8_t i = 0; i < 32; i++)
+	{
+		TraceLine(traceFrom, to, TraceIgnore::Monsters, ignore, &tr);
+		if (tr.flFraction >= 1.0f)
+			return true;
+
+		bool hitDoor = false;
+		if (!IsManualWalkableEntity(tr.pHit, hitDoor) || tr.pHit == previous)
+			return false;
+
+		door = door || hitDoor;
+		previous = ignore;
+		ignore = tr.pHit;
+		traceFrom = tr.vecEndPos + dir * 4.0f;
+	}
+
+	return false;
+}
+
+static bool ManualDirectPathClear(const Vector& from, const Vector& to, bool& door)
+{
+	const float heights[3] = { 1.0f, 18.0f, 36.0f };
+	for (int8_t i = 0; i < 3; i++)
+	{
+		if (!ManualTraceLineClear(from + Vector(0.0f, 0.0f, heights[i]), to + Vector(0.0f, 0.0f, heights[i]), door))
+			return false;
+	}
+
+	const Vector delta = to - from;
+	const float flatLength = squaredf(delta.x) + squaredf(delta.y);
+	if (flatLength > squaredf(1.0f))
+	{
+		const Vector side = Vector(-delta.y, delta.x, 0.0f).Normalize() * 16.0f;
+		const float sideHeights[2] = { 18.0f, 36.0f };
+		for (int8_t i = 0; i < 2; i++)
+		{
+			const Vector height = Vector(0.0f, 0.0f, sideHeights[i]);
+			if (!ManualTraceLineClear(from + side + height, to + side + height, door))
+				return false;
+			if (!ManualTraceLineClear(from - side + height, to - side + height, door))
+				return false;
+		}
+	}
+
+	return true;
+}
+
+static bool HasManualLowCeiling(const Vector& origin)
+{
+	TraceResult ground;
+	TraceLine(origin + Vector(0.0f, 0.0f, 24.0f), origin - Vector(0.0f, 0.0f, 80.0f), TraceIgnore::Monsters, g_hostEntity, &ground);
+
+	Vector floor = origin - Vector(0.0f, 0.0f, 18.0f);
+	if (ground.flFraction < 1.0f)
+		floor = ground.vecEndPos;
+
+	TraceResult ceiling;
+	TraceLine(floor + Vector(0.0f, 0.0f, 4.0f), floor + Vector(0.0f, 0.0f, 74.0f), TraceIgnore::Monsters, g_hostEntity, &ceiling);
+	if (ceiling.flFraction >= 1.0f)
+		return false;
+
+	return FNullEnt(ceiling.pHit) || !FClassnameIs(ceiling.pHit, "func_illusionary");
+}
+
+static void ClearManualConnections(Path& path);
+
+struct AutoWaypointBounds
+{
+	Vector mins;
+	Vector maxs;
+	bool valid;
+};
+
+static AutoWaypointBounds GetAutoWaypointBounds(void)
+{
+	AutoWaypointBounds bounds;
+	bounds.mins = Vector(8192.0f, 8192.0f, 8192.0f);
+	bounds.maxs = Vector(-8192.0f, -8192.0f, -8192.0f);
+	bounds.valid = false;
+
+	const int maxEntities = g_pGlobals ? cclamp(g_pGlobals->maxEntities, 1, 2048) : 1024;
+	for (int i = 0; i < maxEntities; i++)
+	{
+		edict_t* ent = INDEXENT(i);
+		if (FNullEnt(ent) || ent->free || ent->v.solid == SOLID_NOT)
+			continue;
+
+		const Vector size = ent->v.absmax - ent->v.absmin;
+		if (size.x < 1.0f || size.y < 1.0f || size.z < 1.0f)
+			continue;
+
+		bounds.mins.x = cmaxf(-8192.0f, cminf(bounds.mins.x, ent->v.absmin.x));
+		bounds.mins.y = cmaxf(-8192.0f, cminf(bounds.mins.y, ent->v.absmin.y));
+		bounds.mins.z = cmaxf(-8192.0f, cminf(bounds.mins.z, ent->v.absmin.z));
+		bounds.maxs.x = cminf(8192.0f, cmaxf(bounds.maxs.x, ent->v.absmax.x));
+		bounds.maxs.y = cminf(8192.0f, cmaxf(bounds.maxs.y, ent->v.absmax.y));
+		bounds.maxs.z = cminf(8192.0f, cmaxf(bounds.maxs.z, ent->v.absmax.z));
+		bounds.valid = true;
+	}
+
+	if (!bounds.valid)
+	{
+		const Vector center = FNullEnt(g_hostEntity) ? nullvec : GetEntityOrigin(g_hostEntity);
+		bounds.mins = center - Vector(4096.0f, 4096.0f, 1024.0f);
+		bounds.maxs = center + Vector(4096.0f, 4096.0f, 1024.0f);
+		bounds.valid = true;
+	}
+
+	bounds.mins.x -= 64.0f;
+	bounds.mins.y -= 64.0f;
+	bounds.mins.z -= 128.0f;
+	bounds.maxs.x += 64.0f;
+	bounds.maxs.y += 64.0f;
+	bounds.maxs.z += 128.0f;
+	return bounds;
+}
+
+static bool IsAutoDuplicate(Waypoint* waypoint, const Vector& origin, const float radius)
+{
+	const float sameLevelZ = 8.0f;
+	const float radius3d = squaredf(radius);
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		const Vector delta = waypoint->m_paths[i].origin - origin;
+		if (cabsf(delta.z) <= sameLevelZ && delta.GetLengthSquared() <= radius3d)
+			return true;
+	}
+
+	return false;
+}
+
+static bool IsAutoCrouchHullFree(const Vector& origin)
+{
+	edict_t* ignore = g_hostEntity;
+	for (int8_t i = 0; i < 4; i++)
+	{
+		TraceResult tr;
+		TraceHull(origin, origin, TraceIgnore::Monsters, head_hull, ignore, &tr);
+		if (tr.flFraction >= 1.0f && !tr.fStartSolid && !tr.fAllSolid)
+			return true;
+
+		if (FNullEnt(tr.pHit) || (!FClassnameIs(tr.pHit, "func_illusionary") && !FClassnameIs(tr.pHit, "env_sprite")))
+			return false;
+
+		ignore = tr.pHit;
+	}
+
+	return false;
+}
+
+static bool TryAutoWalkableCandidate(const Vector& base, Vector& out)
+{
+	const Vector offsets[9] =
+	{
+		Vector(0.0f, 0.0f, 0.0f),
+		Vector(12.0f, 0.0f, 0.0f),
+		Vector(-12.0f, 0.0f, 0.0f),
+		Vector(0.0f, 12.0f, 0.0f),
+		Vector(0.0f, -12.0f, 0.0f),
+		Vector(12.0f, 12.0f, 0.0f),
+		Vector(-12.0f, 12.0f, 0.0f),
+		Vector(12.0f, -12.0f, 0.0f),
+		Vector(-12.0f, -12.0f, 0.0f)
+	};
+	const float zOffsets[5] = {0.0f, 4.0f, 8.0f, 12.0f, 18.0f};
+
+	for (int8_t z = 0; z < 5; z++)
+	{
+		for (int8_t i = 0; i < 9; i++)
+		{
+			const Vector candidate = base + offsets[i] + Vector(0.0f, 0.0f, zOffsets[z]);
+			if (!IsAutoCrouchHullFree(candidate))
+				continue;
+
+			TraceResult support;
+			TraceLine(candidate + Vector(0.0f, 0.0f, 1.0f), candidate - Vector(0.0f, 0.0f, 48.0f), TraceIgnore::Monsters, g_hostEntity, &support);
+			if (support.flFraction >= 1.0f)
+				continue;
+
+			if (support.vecPlaneNormal.z < 0.35f)
+				continue;
+
+			out = support.vecEndPos + Vector(0.0f, 0.0f, 19.0f);
+			return true;
+		}
+	}
+
+	TraceResult support;
+	TraceLine(base + Vector(0.0f, 0.0f, 1.0f), base - Vector(0.0f, 0.0f, 48.0f), TraceIgnore::Monsters, g_hostEntity, &support);
+	if (support.flFraction < 1.0f && support.vecPlaneNormal.z >= 0.35f)
+	{
+		const Vector lineCandidate = support.vecEndPos + Vector(0.0f, 0.0f, 19.0f);
+
+		TraceResult clearance;
+		TraceLine(lineCandidate, lineCandidate + Vector(0.0f, 0.0f, 36.0f), TraceIgnore::Monsters, g_hostEntity, &clearance);
+		if (clearance.flFraction >= 1.0f || (!FNullEnt(clearance.pHit) && FClassnameIs(clearance.pHit, "func_illusionary")))
+		{
+			out = lineCandidate;
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static bool FindAutoWalkableSpot(Vector probe, const float minZ, Vector& out)
+{
+	for (int tries = 0; tries < 32 && probe.z > minZ; tries++)
+	{
+		TraceResult ground;
+		TraceLine(probe, Vector(probe.x, probe.y, minZ), TraceIgnore::Monsters, g_hostEntity, &ground);
+		if (ground.flFraction >= 1.0f || ground.fAllSolid)
+			return false;
+
+		if (ground.vecPlaneNormal.z > 0.35f && TryAutoWalkableCandidate(ground.vecEndPos + Vector(0.0f, 0.0f, 19.0f), out))
+			return true;
+
+		probe.z = ground.vecEndPos.z - 32.0f;
+	}
+
+	return false;
+}
+
+static bool AddAutoWaypoint(Waypoint* waypoint, const Vector& origin, const uint32_t flags)
+{
+	if (g_numWaypoints >= Const_MaxWaypoints)
+		return false;
+
+	if (!waypoint->m_paths.Push(Path{}))
+		return false;
+
+	const int16_t index = static_cast<int16_t>(waypoint->m_paths.Size() - 1);
+	Path& path = waypoint->m_paths[index];
+	path.origin = origin;
+	path.flags = flags;
+	path.radius = 20;
+	path.mesh = 0;
+	path.gravity = 0.0f;
+	for (int8_t slot = 0; slot < Const_MaxPathIndex; slot++)
+	{
+		path.index[slot] = -1;
+		path.connectionFlags[slot] = 0;
+	}
+
+	g_numWaypoints = waypoint->m_paths.Size();
+	waypoint->AddToBucket(origin, index);
+	return true;
+}
+
+static void AutoSampleEntityTops(Waypoint* waypoint, const float step, const float dedupe)
+{
+	const int maxEntities = g_pGlobals ? cclamp(g_pGlobals->maxEntities, 1, 2048) : 1024;
+	const float surfaceStep = cclamp(step * 0.85f, 96.0f, 160.0f);
+
+	for (int entIndex = 1; entIndex < maxEntities && g_numWaypoints < 1000; entIndex++)
+	{
+		edict_t* ent = INDEXENT(entIndex);
+		if (FNullEnt(ent) || ent->free || ent->v.solid == SOLID_NOT)
+			continue;
+
+		const Vector size = ent->v.absmax - ent->v.absmin;
+		if (size.x < 24.0f || size.y < 24.0f || size.z < 4.0f)
+			continue;
+
+		if (size.x > 2048.0f || size.y > 2048.0f)
+			continue;
+
+		const float minX = ent->v.absmin.x + 18.0f;
+		const float maxX = ent->v.absmax.x - 18.0f;
+		const float minY = ent->v.absmin.y + 18.0f;
+		const float maxY = ent->v.absmax.y - 18.0f;
+		if (minX > maxX || minY > maxY)
+			continue;
+
+		for (float x = minX; x <= maxX && g_numWaypoints < 1000; x += surfaceStep)
+		{
+			for (float y = minY; y <= maxY && g_numWaypoints < 1000; y += surfaceStep)
+			{
+				Vector spot;
+				const Vector probe(x, y, ent->v.absmax.z + 96.0f);
+				if (!FindAutoWalkableSpot(probe, ent->v.absmin.z - 96.0f, spot))
+					continue;
+
+				if (cabsf(spot.z - (ent->v.absmax.z + 19.0f)) > 48.0f)
+					continue;
+
+				if (!IsAutoDuplicate(waypoint, spot, dedupe))
+					AddAutoWaypoint(waypoint, spot, 0);
+			}
+		}
+	}
+}
+
+static void AutoExpandFromSurface(Waypoint* waypoint, const float step, const float dedupe)
+{
+	const Vector dirs[8] =
+	{
+		Vector(1.0f, 0.0f, 0.0f),
+		Vector(-1.0f, 0.0f, 0.0f),
+		Vector(0.0f, 1.0f, 0.0f),
+		Vector(0.0f, -1.0f, 0.0f),
+		Vector(0.7071f, 0.7071f, 0.0f),
+		Vector(-0.7071f, 0.7071f, 0.0f),
+		Vector(0.7071f, -0.7071f, 0.0f),
+		Vector(-0.7071f, -0.7071f, 0.0f)
+	};
+	const int16_t startCount = g_numWaypoints;
+	const float growStep = cclamp(step, 96.0f, 192.0f);
+
+	for (int16_t i = 0; i < startCount && g_numWaypoints < 1000; i++)
+	{
+		const Vector base = waypoint->m_paths[i].origin;
+		for (int8_t dir = 0; dir < 8 && g_numWaypoints < 1000; dir++)
+		{
+			Vector spot;
+			const Vector probe = base + dirs[dir] * growStep + Vector(0.0f, 0.0f, 96.0f);
+			if (!FindAutoWalkableSpot(probe, base.z - 256.0f, spot))
+				continue;
+
+			if (cabsf(spot.z - base.z) > 96.0f)
+				continue;
+
+			if (!IsAutoDuplicate(waypoint, spot, dedupe))
+				AddAutoWaypoint(waypoint, spot, 0);
+		}
+	}
+}
+
+static bool AutoHullPathClear(const Vector& from, const Vector& to, bool& door)
+{
+	TraceResult tr;
+	TraceHull(from, to, TraceIgnore::Monsters, head_hull, g_hostEntity, &tr);
+	if (tr.flFraction >= 1.0f)
+		return true;
+
+	bool hitDoor = false;
+	if (IsManualWalkableEntity(tr.pHit, hitDoor))
+	{
+		door = door || hitDoor;
+		const Vector dir = (to - from).Normalize();
+		Vector retry = tr.vecEndPos + dir * 8.0f;
+		TraceHull(retry, to, TraceIgnore::Monsters, head_hull, tr.pHit, &tr);
+		return tr.flFraction >= 1.0f;
+	}
+
+	return false;
+}
+
+static bool AutoHasGroundAlongPath(const Vector& from, const Vector& to)
+{
+	const Vector delta = to - from;
+	const float distance = delta.GetLength();
+	const int samples = cclamp(static_cast<int>(distance / 32.0f), 1, 8);
+
+	for (int i = 1; i <= samples; i++)
+	{
+		const float scale = static_cast<float>(i) / static_cast<float>(samples + 1);
+		const Vector point = from + delta * scale;
+		TraceResult tr;
+		TraceLine(point + Vector(0.0f, 0.0f, 4.0f), point - Vector(0.0f, 0.0f, 72.0f), TraceIgnore::Monsters, g_hostEntity, &tr);
+		if (tr.flFraction >= 1.0f)
+			return false;
+	}
+
+	return true;
+}
+
+static int8_t AutoSectorFor(const Vector& delta)
+{
+	const float ax = cabsf(delta.x);
+	const float ay = cabsf(delta.y);
+
+	if (ax > ay * 2.0f)
+		return delta.x >= 0.0f ? 0 : 4;
+	if (ay > ax * 2.0f)
+		return delta.y >= 0.0f ? 2 : 6;
+	if (delta.x >= 0.0f && delta.y >= 0.0f)
+		return 1;
+	if (delta.x < 0.0f && delta.y >= 0.0f)
+		return 3;
+	if (delta.x < 0.0f && delta.y < 0.0f)
+		return 5;
+	return 7;
+}
+
+static void AutoTagPoint(Waypoint* waypoint, const int16_t index)
+{
+	Path& path = waypoint->m_paths[index];
+	path.radius = 20;
+	path.flags &= ~(WAYPOINT_HMCAMPMESH | WAYPOINT_HUMANHIGHSPOT);
+
+	if (HasManualNearEntity(path.origin, "func_button", 40.0f) || HasManualNearEntity(path.origin, "func_rot_button", 40.0f))
+		path.flags |= WAYPOINT_USEBUTTON;
+
+	if (HasManualNearEntity(path.origin, "func_ladder", 40.0f))
+		path.flags |= WAYPOINT_LADDER | WAYPOINT_CROUCH;
+
+	if (HasManualLowCeiling(path.origin))
+		path.flags |= WAYPOINT_CROUCH;
+}
+
+static void AutoBuildLinks(Waypoint* waypoint)
+{
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+		ClearManualConnections(waypoint->m_paths[i]);
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		int16_t best[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+		float bestDistance[8] = {9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f};
+
+		for (int16_t j = 0; j < g_numWaypoints; j++)
+		{
+			if (i == j)
+				continue;
+
+			const Vector delta = waypoint->m_paths[j].origin - waypoint->m_paths[i].origin;
+			const float distance = delta.GetLength();
+			if (distance > 420.0f || cabsf(delta.z) > 420.0f)
+				continue;
+
+			bool door = false;
+			if (!AutoHullPathClear(waypoint->m_paths[i].origin, waypoint->m_paths[j].origin, door))
+				continue;
+
+			if (delta.z > 65.0f || (delta.z > -85.0f && !AutoHasGroundAlongPath(waypoint->m_paths[i].origin, waypoint->m_paths[j].origin)))
+				continue;
+
+			const int8_t sector = AutoSectorFor(delta);
+			if (distance < bestDistance[sector])
+			{
+				best[sector] = j;
+				bestDistance[sector] = distance;
+			}
+		}
+
+		for (int8_t sector = 0; sector < 8; sector++)
+		{
+			const int16_t to = best[sector];
+			if (!IsValidWaypoint(to))
+				continue;
+
+			const Vector delta = waypoint->m_paths[to].origin - waypoint->m_paths[i].origin;
+			const float distance = delta.GetLength();
+			const float up = delta.z;
+
+			if (up > 65.0f)
+				continue;
+
+			const bool jump = distance <= 120.0f && up >= 25.0f && up <= 65.0f;
+			waypoint->AddPath(i, to, jump ? 1 : 0);
+			waypoint->m_paths[i].radius = 20;
+
+			if (jump)
+				waypoint->m_paths[i].flags |= WAYPOINT_JUMP;
+			if (distance <= 120.0f && up > 45.0f && up <= 65.0f)
+				waypoint->m_paths[i].flags |= WAYPOINT_CROUCH | WAYPOINT_JUMP;
+			if (up < -85.0f)
+				waypoint->m_paths[i].flags |= WAYPOINT_FALLCHECK;
+		}
+	}
+}
+
+static void AutoGenerateHumanCamps(Waypoint* waypoint)
+{
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		waypoint->m_paths[i].flags &= ~(WAYPOINT_HMCAMPMESH | WAYPOINT_HUMANHIGHSPOT);
+		if (!(waypoint->m_paths[i].flags & WAYPOINT_ZMHMCAMP))
+			waypoint->m_paths[i].flags &= ~WAYPOINT_ZOMBIEPUSH;
+	}
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		if (!(waypoint->m_paths[i].flags & WAYPOINT_CROUCH) || (waypoint->m_paths[i].flags & (WAYPOINT_LADDER | WAYPOINT_ZOMBIEONLY)))
+			continue;
+
+		bool safe = true;
+		for (int8_t slot = 0; slot < Const_MaxPathIndex && safe; slot++)
+		{
+			const int16_t dest = waypoint->m_paths[i].index[slot];
+			if (!IsValidWaypoint(dest))
+				continue;
+
+			if (!(waypoint->m_paths[dest].flags & WAYPOINT_CROUCH))
+			{
+				safe = false;
+				break;
+			}
+
+			for (int8_t deepSlot = 0; deepSlot < Const_MaxPathIndex; deepSlot++)
+			{
+				const int16_t deep = waypoint->m_paths[dest].index[deepSlot];
+				if (IsValidWaypoint(deep) && !(waypoint->m_paths[deep].flags & WAYPOINT_CROUCH))
+				{
+					safe = false;
+					break;
+				}
+			}
+		}
+
+		if (!safe)
+			continue;
+
+		waypoint->m_paths[i].flags |= WAYPOINT_ZMHMCAMP;
+	}
+
+	for (int16_t index = 0; index < g_numWaypoints; index++)
+	{
+		if (!(waypoint->m_paths[index].flags & WAYPOINT_ZMHMCAMP))
+			continue;
+
+		for (int8_t slot = 0; slot < Const_MaxPathIndex; slot++)
+		{
+			const int16_t dest = waypoint->m_paths[index].index[slot];
+			if (IsValidWaypoint(dest) && !(waypoint->m_paths[dest].flags & WAYPOINT_ZMHMCAMP))
+				waypoint->m_paths[dest].flags |= WAYPOINT_ZOMBIEPUSH;
+		}
+	}
+}
+
+static void AutoPruneCloseWaypoints(Waypoint* waypoint, const float radius)
+{
+	const float sameLevelZ = 8.0f;
+	const float radius3d = squaredf(radius);
+
+	for (int16_t i = g_numWaypoints - 1; i >= 0; i--)
+	{
+		for (int16_t j = 0; j < i; j++)
+		{
+			const Vector delta = waypoint->m_paths[i].origin - waypoint->m_paths[j].origin;
+			if (cabsf(delta.z) <= sameLevelZ && delta.GetLengthSquared() <= radius3d)
+			{
+				waypoint->DeleteByIndex(i);
+				break;
+			}
+		}
+	}
+}
+
+static void AutoPruneToLimit(Waypoint* waypoint, const int16_t limit)
+{
+	while (g_numWaypoints > limit)
+	{
+		int16_t best = -1;
+		int bestConnections = 1000;
+
+		for (int16_t i = 0; i < g_numWaypoints; i++)
+		{
+			if (waypoint->m_paths[i].flags & (WAYPOINT_ZMHMCAMP | WAYPOINT_ZOMBIEPUSH | WAYPOINT_LADDER | WAYPOINT_USEBUTTON))
+				continue;
+
+			int connections = 0;
+			for (int8_t slot = 0; slot < Const_MaxPathIndex; slot++)
+			{
+				if (IsValidWaypoint(waypoint->m_paths[i].index[slot]))
+					connections++;
+			}
+
+			if (connections < bestConnections)
+			{
+				best = i;
+				bestConnections = connections;
+			}
+		}
+
+		if (!IsValidWaypoint(best))
+			best = static_cast<int16_t>(g_numWaypoints - 1);
+
+		waypoint->DeleteByIndex(best);
+	}
+}
+
+static void ClearManualConnections(Path& path)
+{
+	for (int8_t slot = 0; slot < Const_MaxPathIndex; slot++)
+	{
+		path.index[slot] = -1;
+		path.connectionFlags[slot] = 0;
+	}
+}
+
+void Waypoint::RunManualPreprocess(void)
+{
+	if (!g_numWaypoints)
+		return;
+
+	m_terrorPoints.Destroy();
+	m_zmHmPoints.Destroy();
+	m_hmMeshPoints.Destroy();
+	m_hmHighSpotPoints.Destroy();
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		Path& path = m_paths[i];
+		path.radius = 35;
+		ClearManualConnections(path);
+		path.flags &= ~(WAYPOINT_CROUCH | WAYPOINT_JUMP | WAYPOINT_FALLCHECK | WAYPOINT_HMCAMPMESH | WAYPOINT_HUMANHIGHSPOT);
+
+		if (HasManualNearEntity(path.origin, "func_button", 35.0f) || HasManualNearEntity(path.origin, "func_rot_button", 35.0f))
+			path.flags |= WAYPOINT_USEBUTTON;
+
+		if (HasManualNearEntity(path.origin, "func_ladder", 35.0f))
+			path.flags |= WAYPOINT_LADDER | WAYPOINT_CROUCH;
+
+		if (HasManualLowCeiling(path.origin) || IsManualPointInArray(g_manualCrouchPoints, i))
+			path.flags |= WAYPOINT_CROUCH;
+
+		if (IsManualPointInArray(g_manualFallcheckPoints, i))
+			path.flags |= WAYPOINT_FALLCHECK;
+
+		if (IsManualPointInArray(g_manualJumpPoints, i))
+			path.flags |= WAYPOINT_JUMP;
+
+		if (IsManualPointInArray(g_manualHumanCampPoints, i))
+			path.flags |= WAYPOINT_ZMHMCAMP;
+
+		if (IsManualPointInArray(g_manualZombieRushPoints, i))
+			path.flags |= WAYPOINT_ZOMBIEPUSH;
+	}
+
+	auto sectorFor = [](const Vector& delta) -> int8_t
+	{
+		const float ax = cabsf(delta.x);
+		const float ay = cabsf(delta.y);
+
+		if (ax > ay * 2.0f)
+			return delta.x >= 0.0f ? 0 : 4;
+		if (ay > ax * 2.0f)
+			return delta.y >= 0.0f ? 2 : 6;
+		if (delta.x >= 0.0f && delta.y >= 0.0f)
+			return 1;
+		if (delta.x < 0.0f && delta.y >= 0.0f)
+			return 3;
+		if (delta.x < 0.0f && delta.y < 0.0f)
+			return 5;
+		return 7;
+	};
+
+	auto addDirectionalPath = [&](const int16_t from, const int16_t to, const bool door)
+	{
+		const Vector& src = m_paths[from].origin;
+		const Vector& dest = m_paths[to].origin;
+		const float up = dest.z - src.z;
+		const float distance = (dest - src).GetLength();
+		const bool canTagFromDistance = distance <= 120.0f;
+
+		if (up > 65.0f)
+			return;
+
+		const bool jump = canTagFromDistance && up >= 25.0f && up <= 65.0f;
+		AddPath(from, to, jump ? 1 : 0);
+		m_paths[from].radius = 35;
+
+		if (jump)
+			m_paths[from].flags |= WAYPOINT_JUMP;
+
+		if (canTagFromDistance && up > 45.0f && up <= 65.0f)
+			m_paths[from].flags |= WAYPOINT_CROUCH | WAYPOINT_JUMP;
+
+		if (door)
+			m_paths[from].flags |= WAYPOINT_WAITUNTIL;
+	};
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		int16_t best[8] = {-1, -1, -1, -1, -1, -1, -1, -1};
+		float bestDistance[8] = {9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f, 9999999.0f};
+
+		for (int16_t j = 0; j < g_numWaypoints; j++)
+		{
+			if (i == j)
+				continue;
+
+			const Vector delta = m_paths[j].origin - m_paths[i].origin;
+			const float distance = delta.GetLength();
+			if (distance > 256.0f)
+				continue;
+
+			bool door = false;
+			if (!ManualDirectPathClear(m_paths[i].origin, m_paths[j].origin, door))
+				continue;
+
+			const int8_t sector = sectorFor(delta);
+			if (distance < bestDistance[sector])
+			{
+				best[sector] = j;
+				bestDistance[sector] = distance;
+			}
+		}
+
+		for (int8_t sector = 0; sector < 8; sector++)
+		{
+			const int16_t to = best[sector];
+			if (!IsValidWaypoint(to))
+				continue;
+
+			bool door = false;
+			if (!ManualDirectPathClear(m_paths[i].origin, m_paths[to].origin, door))
+				continue;
+
+			const float zDelta = m_paths[to].origin.z - m_paths[i].origin.z;
+			if (cabsf(zDelta) > 65.0f)
+			{
+				if (zDelta < 0.0f)
+					addDirectionalPath(i, to, door);
+			}
+			else
+			{
+				addDirectionalPath(i, to, door);
+				addDirectionalPath(to, i, door);
+			}
+		}
+	}
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		if (IsManualPointInArray(g_manualCrouchPoints, i))
+			m_paths[i].flags |= WAYPOINT_CROUCH;
+		if (IsManualPointInArray(g_manualFallcheckPoints, i))
+			m_paths[i].flags |= WAYPOINT_FALLCHECK;
+		if (IsManualPointInArray(g_manualJumpPoints, i))
+			m_paths[i].flags |= WAYPOINT_JUMP;
+		if (IsManualPointInArray(g_manualNoCrouchPoints, i))
+			m_paths[i].flags &= ~WAYPOINT_CROUCH;
+		if (IsManualPointInArray(g_manualNoFallcheckPoints, i))
+			m_paths[i].flags &= ~WAYPOINT_FALLCHECK;
+		if (IsManualPointInArray(g_manualNoJumpPoints, i))
+		{
+			m_paths[i].flags &= ~WAYPOINT_JUMP;
+			ClearManualJumpConnections(m_paths[i]);
+		}
+
+		if (IsManualPointInArray(g_manualHumanCampPoints, i))
+			m_paths[i].flags |= WAYPOINT_ZMHMCAMP;
+		if (IsManualPointInArray(g_manualZombieRushPoints, i))
+			m_paths[i].flags |= WAYPOINT_ZOMBIEPUSH;
+
+		m_paths[i].radius = 35;
+		if (m_paths[i].flags & WAYPOINT_ZMHMCAMP)
+			m_zmHmPoints.Push(i);
+		else if (m_paths[i].flags & WAYPOINT_TERRORIST)
+			m_terrorPoints.Push(i);
+	}
+
+	g_waypointsChanged = true;
+	InitPathMatrix();
+}
+
+void Waypoint::AutoGeneratePaths(void)
+{
+	if (FNullEnt(g_hostEntity))
+		return;
+
+	ServerPrint("EBOT waypoint autogeneration started");
+	CenterPrint("EBOT waypoint autogeneration started");
+
+	CArray<Path> backupPaths;
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+		backupPaths.Push(m_paths[i]);
+
+	const AutoWaypointBounds bounds = GetAutoWaypointBounds();
+	const float steps[3] = {256.0f, 192.0f, 144.0f};
+
+	DestroyBuckets();
+	Initialize();
+	m_terrorPoints.Destroy();
+	m_zmHmPoints.Destroy();
+	m_hmMeshPoints.Destroy();
+	m_hmHighSpotPoints.Destroy();
+
+	for (int cycle = 0; cycle < 3; cycle++)
+	{
+		const float step = steps[cycle];
+		const float dedupe = cycle == 0 ? 96.0f : cycle == 1 ? 80.0f : 64.0f;
+		const float offsets[2][2] =
+		{
+			{0.0f, 0.0f},
+			{step * 0.5f, step * 0.5f}
+		};
+		const int offsetCount = cycle == 2 ? 2 : 1;
+
+		for (int offset = 0; offset < offsetCount && g_numWaypoints < 1000; offset++)
+		{
+			for (float x = bounds.mins.x + offsets[offset][0]; x <= bounds.maxs.x && g_numWaypoints < 1000; x += step)
+			{
+				for (float y = bounds.mins.y + offsets[offset][1]; y <= bounds.maxs.y && g_numWaypoints < 1000; y += step)
+				{
+					Vector probe(x, y, bounds.maxs.z + 64.0f);
+					for (int layer = 0; layer < 10 && probe.z > bounds.mins.z && g_numWaypoints < 1000; layer++)
+					{
+						Vector spot;
+						if (!FindAutoWalkableSpot(probe, bounds.mins.z, spot))
+							break;
+
+						if (!IsAutoDuplicate(this, spot, dedupe))
+							AddAutoWaypoint(this, spot, 0);
+
+						probe.z = spot.z - 72.0f;
+					}
+				}
+			}
+		}
+
+		if (cycle == 2 && g_numWaypoints < 850)
+			AutoSampleEntityTops(this, step, dedupe);
+
+		AutoExpandFromSurface(this, step, dedupe);
+		AutoPruneCloseWaypoints(this, cycle == 0 ? 96.0f : cycle == 1 ? 80.0f : 64.0f);
+
+		for (int16_t i = 0; i < g_numWaypoints; i++)
+			AutoTagPoint(this, i);
+
+		AutoBuildLinks(this);
+		AutoGenerateHumanCamps(this);
+		AutoPruneToLimit(this, 1000);
+	}
+
+	if (!g_numWaypoints)
+	{
+		DestroyBuckets();
+		Initialize();
+		for (int16_t i = 0; i < backupPaths.Size(); i++)
+		{
+			m_paths.Push(backupPaths[i]);
+			AddToBucket(backupPaths[i].origin, i);
+		}
+		g_numWaypoints = m_paths.Size();
+		ServerPrint("EBOT waypoint autogeneration failed: no walkable points found");
+		CenterPrint("EBOT waypoint autogeneration failed\nNo walkable points found");
+		return;
+	}
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+		AutoTagPoint(this, i);
+
+	AutoBuildLinks(this);
+	AutoGenerateHumanCamps(this);
+
+	m_terrorPoints.Destroy();
+	m_hmMeshPoints.Destroy();
+	m_hmHighSpotPoints.Destroy();
+	m_zmHmPoints.Destroy();
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		m_paths[i].radius = 20;
+		if (m_paths[i].flags & WAYPOINT_ZMHMCAMP)
+			m_zmHmPoints.Push(i);
+		else if (m_paths[i].flags & WAYPOINT_TERRORIST)
+			m_terrorPoints.Push(i);
+	}
+
+	NormalizeLadderFlags();
+	g_waypointsChanged = true;
+	InitPathMatrix();
+	ServerPrint("EBOT waypoint autogeneration finished: %d waypoints", g_numWaypoints);
+	CenterPrint("EBOT waypoint autogeneration finished\n%d waypoints", g_numWaypoints);
+}
+
 void Waypoint::InitTypes(void)
 {
 	m_terrorPoints.Destroy();
@@ -2223,10 +3330,7 @@ void Waypoint::InitTypes(void)
 	}
 
 	NormalizeLadderFlags();
-	AddZMCamps();
-	AddHighSpotPoints();
 	ConnectReachableGaps();
-	AssignHumanCampGroups();
 }
 
 // static array to keep track of matrix calculation threads
@@ -3404,14 +4508,15 @@ char* Waypoint::GetWaypointInfo(const int16_t id)
 	if (!path)
 		return messageBuffer;
 
-	bool jumpPoint = false;
+	const bool forceNoJump = IsManualPointInArray(g_manualNoJumpPoints, id);
+	bool jumpPoint = (path->flags & WAYPOINT_JUMP) && !forceNoJump;
 
 	// iterate through connections and find, if it's a jump path
 	int16_t i;
 	for (i = 0; i < Const_MaxPathIndex; i++)
 	{
 		// check if we got a valid connection
-		if (path->index[i] != -1 && (path->connectionFlags[i] & PATHFLAG_JUMP))
+		if (!forceNoJump && path->index[i] != -1 && (path->connectionFlags[i] & PATHFLAG_JUMP))
 		{
 			jumpPoint = true;
 

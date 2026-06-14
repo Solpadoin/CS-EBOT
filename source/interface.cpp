@@ -276,6 +276,30 @@ int BotCommandHandler_O(edict_t* ent, const char* arg0, const char* arg1, const 
 	else if (!cstricmp(arg0, "botmenu") || !cstricmp(arg0, "menu"))
 		DisplayMenuToClient(ent, &g_menus[0]);
 
+	// displays simplified zombie-mode waypoint menu
+	else if (!cstricmp(arg0, "botwp") || !cstricmp(arg0, "botwaypoints"))
+	{
+		edict_t* target = ent;
+		if (!IsNullString(arg1))
+		{
+			const int targetIndex = catoi(arg1);
+			if (targetIndex >= 1 && targetIndex <= engine->GetMaxClients())
+				target = INDEXENT(targetIndex);
+		}
+
+		if (IsAlive(target))
+		{
+			g_hostEntity = target;
+			g_waypointOn = true;
+			DisplayMenuToClient(target, &g_menus[28]);
+		}
+		else
+		{
+			DisplayMenuToClient(target, nullptr);
+			CenterPrint("You're dead, and have no access to this menu");
+		}
+	}
+
 	// display command menu
 	else if (!cstricmp(arg0, "cmdmenu") || !cstricmp(arg0, "cmenu"))
 	{
@@ -520,7 +544,22 @@ int BotCommandHandler_O(edict_t* ent, const char* arg0, const char* arg1, const 
 
 		// displays waypoint menu
 		else if (!cstricmp(arg1, "menu"))
-			DisplayMenuToClient(g_hostEntity, &g_menus[9]);
+		{
+			edict_t* target = g_hostEntity;
+			if (!IsNullString(arg2))
+			{
+				const int targetIndex = catoi(arg2);
+				if (targetIndex >= 1 && targetIndex <= engine->GetMaxClients())
+					target = INDEXENT(targetIndex);
+			}
+
+			if (!FNullEnt(target))
+			{
+				g_hostEntity = target;
+				g_waypointOn = true;
+				DisplayMenuToClient(target, &g_menus[9]);
+			}
+		}
 
 		// otherwise display waypoint current status
 		else
@@ -977,6 +1016,19 @@ void ClientUserInfoChanged(edict_t* ent, char* infobuffer)
 	RETURN_META(MRES_IGNORED);
 }
 
+static bool HasEbotPasswordAccess(edict_t* ent)
+{
+	if (FNullEnt(ent))
+		return false;
+
+	const char* passwordField = ebot_password_key.GetString();
+	const char* password = ebot_password.GetString();
+	if (IsNullString(passwordField) || IsNullString(password))
+		return false;
+
+	return !cstrcmp(password, INFOKEY_VALUE(GET_INFOKEYBUFFER(ent), const_cast<char*>(passwordField)));
+}
+
 void ClientCommand(edict_t* ent)
 {
 	// this function is called whenever the client whose player entity is ent issues a client
@@ -1001,10 +1053,26 @@ void ClientCommand(edict_t* ent)
 
 	static int fillServerTeam = 5;
 	static bool fillCommand = false;
+	const char* command = CMD_ARGV(0);
+	const char* arg1 = CMD_ARGV(1);
+
+	if (!g_isFakeCommand && HasEbotPasswordAccess(ent) && (!cstricmp(command, "ebot_botwp") || !cstricmp(command, "ebot_wp_menu")))
+	{
+		g_clients[clientIndex].flags |= CFLAG_OWNER;
+		g_hostEntity = ent;
+		g_waypointOn = true;
+
+		if (!cstricmp(command, "ebot_botwp"))
+			DisplayMenuToClient(ent, &g_menus[28]);
+		else
+			DisplayMenuToClient(ent, &g_menus[9]);
+
+		RETURN_META(MRES_SUPERCEDE);
+	}
+
 	if (!g_isFakeCommand && (ent == g_hostEntity || (g_clients[clientIndex].flags & CFLAG_OWNER)))
 	{
-		const char* command = CMD_ARGV(0);
-		const char* arg1 = CMD_ARGV(1);
+		g_hostEntity = ent;
 		if (!cstricmp(command, "ebot"))
 		{
 			BotCommandHandler(ent, IsNullString(CMD_ARGV(1)) ? "help" : CMD_ARGV(1), CMD_ARGV(2), CMD_ARGV(3), CMD_ARGV(4), CMD_ARGV(5), CMD_ARGV(6));
@@ -1014,7 +1082,78 @@ void ClientCommand(edict_t* ent)
 		{
 			Clients* client = &g_clients[clientIndex];
 			const int selection = catoi(arg1);
-			if (client->menu == &g_menus[12])
+			if (client->menu == &g_menus[28])
+			{
+				switch (selection)
+				{
+					case 1:
+					{
+						g_waypoint->AddManualWaypoint(GetEntityOrigin(ent));
+						DisplayMenuToClient(ent, &g_menus[28]);
+						break;
+					}
+					case 2:
+					{
+						g_waypoint->Delete();
+						DisplayMenuToClient(ent, &g_menus[28]);
+						break;
+					}
+					case 3:
+					{
+						g_waypoint->ToggleFlagsToNearest(WAYPOINT_ZMHMCAMP);
+						DisplayMenuToClient(ent, &g_menus[28]);
+						break;
+					}
+					case 4:
+					{
+						g_waypoint->ToggleFlagsToNearest(WAYPOINT_ZOMBIEPUSH);
+						DisplayMenuToClient(ent, &g_menus[28]);
+						break;
+					}
+					case 5:
+					{
+						g_waypoint->ToggleFlagsToNearest(WAYPOINT_CROUCH);
+						DisplayMenuToClient(ent, &g_menus[28]);
+						break;
+					}
+					case 6:
+					{
+						g_waypoint->ToggleFlagsToNearest(WAYPOINT_FALLCHECK);
+						DisplayMenuToClient(ent, &g_menus[28]);
+						break;
+					}
+					case 7:
+					{
+						g_waypoint->ToggleFlagsToNearest(WAYPOINT_JUMP);
+						DisplayMenuToClient(ent, &g_menus[28]);
+						break;
+					}
+					case 8:
+					{
+						g_waypoint->RunManualPreprocess();
+						g_waypoint->Save();
+						g_waypoint->SavePathMatrix();
+						DisplayMenuToClient(ent, nullptr);
+						break;
+					}
+					case 9:
+					{
+						g_waypoint->AutoGeneratePaths();
+						g_waypoint->Save();
+						g_waypoint->SavePathMatrix();
+						DisplayMenuToClient(ent, nullptr);
+						break;
+					}
+					case 10:
+					{
+						DisplayMenuToClient(ent, nullptr);
+						break;
+					}
+				}
+
+				RETURN_META(MRES_SUPERCEDE);
+			}
+			else if (client->menu == &g_menus[12])
 			{
 				DisplayMenuToClient(ent, nullptr); // reset menu display
 				switch (selection)
@@ -3752,8 +3891,7 @@ DLL_GIVEFNPTRSTODLL GiveFnptrsToDll(enginefuncs_t* functionTable, globalvars_t* 
 	ModSupport* knownMod = nullptr;
 	char gameDLLName[256];
 
-	int i;
-	for (i = 0; i < sizeof(s_supportedMods); i++)
+	for (size_t i = 0; i < sizeof(s_supportedMods) / sizeof(s_supportedMods[0]); i++)
 	{
 		ModSupport* mod = &s_supportedMods[i];
 		if (!cstrcmp(mod->name, GetModName()))
@@ -3762,7 +3900,6 @@ DLL_GIVEFNPTRSTODLL GiveFnptrsToDll(enginefuncs_t* functionTable, globalvars_t* 
 			break;
 		}
 	}
-
 	if (knownMod)
 		g_gameVersion = knownMod->modType;
 	else

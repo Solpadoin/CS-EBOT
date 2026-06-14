@@ -212,6 +212,9 @@ bool Bot::CheckReachable(void)
 	if (FNullEnt(m_nearestEnemy))
 		return m_isEnemyReachable = false;
 
+	if (m_isZombieBot && m_nearestEnemy->v.origin.z > pev->origin.z + 55.0f)
+		return m_isEnemyReachable = false;
+
 	// path matrix returns 0 if we are on the same waypoint
 	if (Math::FltZero(m_enemyDistance))
 		return m_isEnemyReachable = true;
