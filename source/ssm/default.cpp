@@ -268,6 +268,57 @@ void Bot::DefaultUpdate(void)
 
 			ResetStuck();
 
+			if (!m_hasEnemiesNear && m_isSlowThink && chanceof(10))
+			{
+				int16_t migrateCamp = -1;
+				float bestDistance = FLT_MAX;
+
+				auto tryCamp = [&](const int16_t camp)
+				{
+					if (!IsValidWaypoint(camp) || camp == m_currentWaypointIndex || camp == m_zhCampPointIndex)
+						return;
+
+					const Path* campPath = g_waypoint->GetPath(camp);
+					if (!campPath || !(campPath->flags & (WAYPOINT_ZMHMCAMP | WAYPOINT_HMCAMPMESH | WAYPOINT_HUMANHIGHSPOT)))
+						return;
+
+					float distance = (campPath->origin - pev->origin).GetLengthSquared();
+					if (g_isMatrixReady && IsValidWaypoint(m_currentWaypointIndex))
+					{
+						const int16_t matrixDistance = *(g_waypoint->m_distMatrix.Get() + (m_currentWaypointIndex * g_numWaypoints) + camp);
+						if (matrixDistance >= 32760)
+							return;
+
+						distance = static_cast<float>(matrixDistance) * static_cast<float>(matrixDistance);
+					}
+
+					if (distance < bestDistance)
+					{
+						bestDistance = distance;
+						migrateCamp = camp;
+					}
+				};
+
+				for (int16_t i = 0; i < g_waypoint->m_zmHmPoints.Size(); i++)
+					tryCamp(g_waypoint->m_zmHmPoints.Get(i));
+
+				for (int16_t i = 0; i < g_waypoint->m_hmMeshPoints.Size(); i++)
+					tryCamp(g_waypoint->m_hmMeshPoints.Get(i));
+
+				for (int16_t i = 0; i < g_waypoint->m_hmHighSpotPoints.Size(); i++)
+					tryCamp(g_waypoint->m_hmHighSpotPoints.Get(i));
+
+				if (IsValidWaypoint(migrateCamp))
+				{
+					m_myMeshWaypoint = -1;
+					m_zhCampPointIndex = migrateCamp;
+					m_currentGoalIndex = m_zhCampPointIndex;
+					m_currentProcessTime = engine->GetTime() + crandomfloat(8.0f, 14.0f);
+					FindPath(m_currentWaypointIndex, m_zhCampPointIndex);
+					return;
+				}
+			}
+
 			if (!g_waypoint->m_hmMeshPoints.IsEmpty())
 			{
 				const float time2 = engine->GetTime();

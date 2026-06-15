@@ -446,7 +446,6 @@ void Bot::DoWaypointNav(void)
 	{
 		m_currentTravelFlags &= ~PATHFLAG_JUMP;
 		m_buttons &= ~IN_JUMP;
-		m_duckTime = engine->GetTime() + 0.25f;
 	}
 
 	// check if there is a breakable entity blocking our jump path
@@ -598,7 +597,9 @@ void Bot::DoWaypointNav(void)
 	if (!IsValidWaypoint(m_currentWaypointIndex) && IsValidWaypoint(m_navNode.First()))
 		ChangeWptIndex(m_navNode.First());
 
-	if (m_waypoint.flags & WAYPOINT_FALLCHECK)
+	const bool targetIsHigher = !FNullEnt(m_nearestEnemy) ? (m_nearestEnemy->v.origin.z > pev->origin.z + 55.0f) :
+		(IsValidWaypoint(m_currentGoalIndex) && g_waypoint->m_paths[m_currentGoalIndex].origin.z > pev->origin.z + 55.0f);
+	if ((m_waypoint.flags & WAYPOINT_FALLCHECK) && targetIsHigher)
 	{
 		TraceResult tr;
 		const Vector origin = g_waypoint->m_paths[m_currentWaypointIndex].origin;
@@ -1813,6 +1814,8 @@ bool RunAsyncAStar(PathJob* job, CArray<AStar>& waypoints, LocalPriorityQueue& o
 	Waypoint *gP = g_waypoint;
 	if (!gP)
 		return false;
+	const bool goalIsHigher = IsValidWaypoint(srcIndex) && IsValidWaypoint(destIndex) &&
+		gP->m_paths[destIndex].origin.z > gP->m_paths[srcIndex].origin.z + 55.0f;
 
 	int seed = job->botIndex + 42;
 	float min = ebot_pathfinder_seed_min.GetFloat();
@@ -1877,7 +1880,7 @@ bool RunAsyncAStar(PathJob* job, CArray<AStar>& waypoints, LocalPriorityQueue& o
 			uint32_t flags = gP->m_paths[self].flags;
 			if (flags)
 			{
-				if (flags & WAYPOINT_FALLCHECK)
+				if ((flags & WAYPOINT_FALLCHECK) && goalIsHigher)
 				{
 					if (!g_waypointCache[self].fallCheckPassed)
 						continue;
@@ -1950,6 +1953,8 @@ bool RunAsyncShortestPath(PathJob* job, CArray<AStar>& waypoints, LocalPriorityQ
 	Waypoint *gP = g_waypoint;
 	if (!gP)
 		return false;
+	const bool goalIsHigher = IsValidWaypoint(srcIndex) && IsValidWaypoint(destIndex) &&
+		gP->m_paths[destIndex].origin.z > gP->m_paths[srcIndex].origin.z + 55.0f;
 
 	int16_t i;
 	for (i = 0; i < g_numWaypoints; i++)
@@ -2007,7 +2012,7 @@ bool RunAsyncShortestPath(PathJob* job, CArray<AStar>& waypoints, LocalPriorityQ
 			uint32_t flags = gP->m_paths[self].flags;
 			if (flags)
 			{
-				if (flags & WAYPOINT_FALLCHECK)
+				if ((flags & WAYPOINT_FALLCHECK) && goalIsHigher)
 				{
 					if (!g_waypointCache[self].fallCheckPassed)
 						continue;
@@ -2644,6 +2649,16 @@ int16_t Bot::FindWaypoint(void)
 	{
 		int16_t index = -1;
 		bool foundOnPath = false;
+		auto isUsableLevel = [this](int16_t waypointIndex) -> bool
+		{
+			if (!IsValidWaypoint(waypointIndex))
+				return false;
+
+			if (IsOnLadder() || (g_waypoint->m_paths[waypointIndex].flags & WAYPOINT_LADDER))
+				return true;
+
+			return cabsf(g_waypoint->m_paths[waypointIndex].origin.z - pev->origin.z) <= 96.0f;
+		};
 
 		if (m_navNode.HasNext())
 		{
@@ -2679,7 +2694,7 @@ int16_t Bot::FindWaypoint(void)
 
 		if (!foundOnPath)
 		{
-			if ((!m_isStuck || m_stuckTime < 1.0f)  && g_clients[m_index].wp != m_lastDeclineWaypoint && g_waypoint->Reachable(GetEntity(), g_clients[m_index].wp))
+			if ((!m_isStuck || m_stuckTime < 1.0f)  && g_clients[m_index].wp != m_lastDeclineWaypoint && isUsableLevel(g_clients[m_index].wp) && g_waypoint->Reachable(GetEntity(), g_clients[m_index].wp))
 				index = g_clients[m_index].wp;
 			else
 			{
@@ -2693,6 +2708,8 @@ int16_t Bot::FindWaypoint(void)
 					for (int16_t i = 0; i < g_numWaypoints; i++)
 					{
 						if (i == m_lastDeclineWaypoint)
+							continue;
+						if (!isUsableLevel(i))
 							continue;
 
 						float distance = (g_waypoint->GetPath(i)->origin - pev->origin).GetLengthSquared();
@@ -2718,6 +2735,8 @@ int16_t Bot::FindWaypoint(void)
 					{
 						if (i == m_lastDeclineWaypoint)
 							continue;
+						if (!isUsableLevel(i))
+							continue;
 
 						float distance = (g_waypoint->GetPath(i)->origin - pev->origin).GetLengthSquared();
 						if (distance < minDistance)
@@ -2728,6 +2747,9 @@ int16_t Bot::FindWaypoint(void)
 					}
 
 					index = bestIdx;
+
+					if (!IsValidWaypoint(index))
+						index = g_waypoint->FindNearest(pev->origin, 99999.0f);
 				}
 			}
 		}

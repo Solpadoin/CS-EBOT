@@ -278,6 +278,7 @@
   </ItemDefinitionGroup>
   <ItemGroup>
 	<ClCompile Include="..\source\basecode.cpp" />
+	<ClCompile Include="..\source\algorithm_ai.cpp" />
 	<ClCompile Include="..\source\clib.cpp" />
 	<ClCompile Include="..\source\tinythread.cpp" />
 	<ClCompile Include="..\source\combat.cpp" />
@@ -319,6 +320,7 @@
 	<ClInclude Include="..\include\sse_mathfun_extension.h" />
 	<ClInclude Include="..\include\bot_query_hook.h" />
 	<ClInclude Include="..\include\async_pathfinder.h" />
+	<ClInclude Include="..\include\algorithm_ai.h" />
    </ItemGroup>
   <ItemGroup>
 	<ResourceCompile Include="..\include\ebot.rc" />

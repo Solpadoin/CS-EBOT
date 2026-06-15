@@ -712,9 +712,13 @@ inline void LoadEntityData(void)
 				g_clients[i].wp = g_waypoint->FindNearestToEnt(g_clients[i].origin, 99999.0f, g_clients[i].ent);
 				if (!IsValidWaypoint(g_clients[i].wp))
 				{
-					g_clients[i].wp = g_waypoint->FindNearest(g_clients[i].origin, 99999.0f);
+					g_clients[i].wp = g_waypoint->FindNearestSameLevel(g_clients[i].origin, 99999.0f);
 					if (!IsValidWaypoint(g_clients[i].wp))
-						g_clients[i].wp = static_cast<int16_t>(crandomint(0, g_numWaypoints - 1));
+					{
+						g_clients[i].wp = g_waypoint->FindNearest(g_clients[i].origin, 99999.0f);
+						if (!IsValidWaypoint(g_clients[i].wp))
+							g_clients[i].wp = static_cast<int16_t>(crandomint(0, g_numWaypoints - 1));
+					}
 				}
 			}
 
@@ -1055,6 +1059,9 @@ void ClientCommand(edict_t* ent)
 	static bool fillCommand = false;
 	const char* command = CMD_ARGV(0);
 	const char* arg1 = CMD_ARGV(1);
+
+	if (!g_isFakeCommand && (!cstricmp(command, "say") || !cstricmp(command, "say_team")))
+		AlgorithmAI_OnPlayerChat(ent, CMD_ARGS());
 
 	if (!g_isFakeCommand && HasEbotPasswordAccess(ent) && (!cstricmp(command, "ebot_botwp") || !cstricmp(command, "ebot_wp_menu")))
 	{
@@ -2549,6 +2556,7 @@ void StartFrame_Post(void)
 	// for the bots by the MOD side, remember).	Post version called only by metamod.
 
 	g_botManager->Think();
+	AlgorithmAI_Think();
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -2565,6 +2573,7 @@ void GameDLLInit_Post(void)
 
 	// determine version of currently running cs
 	DetectCSVersion();
+	AlgorithmAI_StartHelper();
 	RETURN_META(MRES_IGNORED);
 }
 
@@ -2979,6 +2988,7 @@ exportc int Meta_Detach(PLUG_LOADTIME now, PL_UNLOAD_REASON reason)
 
 	g_botManager->RemoveAll(); // kick all bots off this server
 
+	AlgorithmAI_StopHelper();
 	unhook_sendto_function();
 
 	return true;

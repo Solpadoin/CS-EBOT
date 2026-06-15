@@ -1243,7 +1243,16 @@ void Bot::LookAtAround(void)
 	}
 	else if (m_waypoint.flags & WAYPOINT_LADDER || IsOnLadder())
 	{
-		m_lookAt = m_destOrigin + pev->view_ofs;
+		Vector flat = (m_destOrigin - pev->origin).Normalize2D();
+		if (flat.IsNull())
+		{
+			MakeVectors(Vector(0.0f, pev->v_angle.y, 0.0f));
+			flat = g_pGlobals->v_forward.Normalize2D();
+		}
+
+		const bool climbingUp = m_destOrigin.z > pev->origin.z + 12.0f || m_waypoint.origin.z > pev->origin.z + 12.0f;
+		const float verticalLook = climbingUp ? 512.0f : -512.0f;
+		m_lookAt = EyePosition() + flat * 90.0f + Vector(0.0f, 0.0f, verticalLook);
 		m_pauseTime = engine->GetTime() + 1.0f;
 		return;
 	}

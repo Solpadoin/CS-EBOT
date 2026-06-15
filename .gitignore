@@ -8,3 +8,4 @@ project/*.user
 *.log
 *.tmp
 *.bak
+tools/algorithm_ai/models/*.gguf

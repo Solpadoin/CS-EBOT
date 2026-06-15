@@ -1070,6 +1070,7 @@ public:
 	int16_t FindFarest(const Vector &origin, float maxDistance = 99999.0f);
 	int16_t FindNearest(const Vector &origin, float minDistance = 99999.0f);
 	int16_t FindNearestSlow(const Vector &origin, float minDistance = 99999.0f);
+	int16_t FindNearestSameLevel(const Vector &origin, float minDistance = 99999.0f, float maxZDiff = 96.0f);
 	int16_t FindNearestToEnt(const Vector &origin, float minDistance, edict_t *entity);
 	int16_t FindNearestToEntSlow(const Vector &origin, float minDistance, edict_t *entity);
 	int16_t FindNearestAnalyzer(const Vector &origin, float minDistance = 99999.0f, const float range = 99999.0f);
@@ -1294,6 +1295,10 @@ inline Vector GetPlayerHeadOrigin(edict_t *ent, float distance = 0.0f, int weapo
 extern void FreeLibraryMemory(void);
 extern void RoundInit(void);
 extern void FakeClientCommand(edict_t *fakeClient, const char *format, ...);
+extern void AlgorithmAI_OnPlayerChat(edict_t *player, const char *text);
+extern void AlgorithmAI_Think(void);
+extern void AlgorithmAI_StartHelper(void);
+extern void AlgorithmAI_StopHelper(void);
 extern void CreateWaypointPath(char *path);
 extern void ServerCommand(const char *format, ...);
 extern void RegisterCommand(const char *command, void funcPtr(void));

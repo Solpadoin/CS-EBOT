@@ -977,15 +977,46 @@ int16_t Waypoint::FindNearestSlow(const Vector& origin, float minDistance)
 	return index;
 }
 
+int16_t Waypoint::FindNearestSameLevel(const Vector& origin, float minDistance, float maxZDiff)
+{
+	int16_t index = -1;
+	minDistance = squaredf(minDistance);
+	float distance;
+
+	for (int16_t i = 0; i < g_numWaypoints; i++)
+	{
+		if (cabsf(m_paths[i].origin.z - origin.z) > maxZDiff)
+			continue;
+
+		distance = (m_paths[i].origin - origin).GetLengthSquared();
+		if (distance < minDistance)
+		{
+			index = i;
+			minDistance = distance;
+		}
+	}
+
+	return index;
+}
+
+static bool IsWaypointHeightUsableForEntity(const Vector& origin, const Vector& waypointOrigin, edict_t* entity)
+{
+	if (FNullEnt(entity) || entity->v.movetype == MOVETYPE_FLY)
+		return true;
+
+	return cabsf(waypointOrigin.z - origin.z) <= 96.0f;
+}
+
 int16_t Waypoint::FindNearestToEnt(const Vector& origin, float minDistance, edict_t* entity)
 {
 	if (g_numWaypoints < 165)
 		return FindNearestToEntSlow(origin, minDistance, entity);
 
+	const float originalMinDistance = minDistance;
 	minDistance = squaredf(minDistance);
 	CArray<int16_t>&bucket = GetWaypointsInBucket(origin);
 	if (bucket.IsEmpty())
-		return FindNearestToEntSlow(origin, minDistance, entity);
+		return FindNearestToEntSlow(origin, originalMinDistance, entity);
 
 	int16_t index = -1;
 	float distance;
@@ -995,6 +1026,9 @@ int16_t Waypoint::FindNearestToEnt(const Vector& origin, float minDistance, edic
 	{
 		if (IsValidWaypoint(bucket[i]))
 		{
+			if (!IsWaypointHeightUsableForEntity(origin, m_paths[bucket[i]].origin, entity))
+				continue;
+
 			distance = (m_paths[bucket[i]].origin - origin).GetLengthSquared();
 			if (distance < minDistance)
 			{
@@ -1008,7 +1042,7 @@ int16_t Waypoint::FindNearestToEnt(const Vector& origin, float minDistance, edic
 	}
 
 	if (!IsValidWaypoint(index))
-		return FindNearestToEntSlow(origin, minDistance, entity);
+		return FindNearestToEntSlow(origin, originalMinDistance, entity);
 
 	return index;
 }
@@ -1016,11 +1050,15 @@ int16_t Waypoint::FindNearestToEnt(const Vector& origin, float minDistance, edic
 int16_t Waypoint::FindNearestToEntSlow(const Vector& origin, float minDistance, edict_t* entity)
 {
 	int16_t index = -1;
+	minDistance = squaredf(minDistance);
 	float distance;
 
 	int16_t i;
 	for (i = 0; i < g_numWaypoints; i++)
 	{
+		if (!IsWaypointHeightUsableForEntity(origin, m_paths[i].origin, entity))
+			continue;
+
 		distance = (m_paths[i].origin - origin).GetLengthSquared();
 		if (distance < minDistance)
 		{
@@ -1132,6 +1170,8 @@ void Waypoint::Add(const int flags, const Vector& waypointOrigin, const float an
 		}
 		path = &m_paths[index];
 		g_numWaypoints = m_paths.Size();
+		g_isMatrixReady = false;
+		m_distMatrix.Destroy();
 
 		if (flags == 1)
 			path->flags = WAYPOINT_FALLCHECK;
@@ -1154,9 +1194,8 @@ void Waypoint::Add(const int flags, const Vector& waypointOrigin, const float an
 		m_lastWaypoint = GetEntityOrigin(g_hostEntity);
 	}
 
-	// set the time that this waypoint was originally displayed...
-	if (m_waypointDisplayTime.IsAllocated())
-		m_waypointDisplayTime[index] = 0.0f;
+	// Waypoint count changed, so the display cache must be rebuilt with the new size.
+	m_waypointDisplayTime.Destroy();
 
 	if (flags == 9)
 		m_lastJumpWaypoint = index;
@@ -1639,12 +1678,13 @@ void Waypoint::DeleteByIndex(const int16_t index)
 	m_paths.RemoveAt(index);
 
 	g_numWaypoints--;
+	g_isMatrixReady = false;
+	m_distMatrix.Destroy();
 	DestroyBuckets();
 	for (i = 0; i < g_numWaypoints; i++)
 		AddToBucket(m_paths[i].origin, i);
 
-	if (m_waypointDisplayTime.IsAllocated())
-		m_waypointDisplayTime[index] = 0.0f;
+	m_waypointDisplayTime.Destroy();
 
 	PlaySound(g_hostEntity, "weapons/mine_activate.wav");
 }
@@ -2185,7 +2225,6 @@ void Waypoint::NormalizeLadderFlags(void)
 		if (!(m_paths[i].flags & WAYPOINT_LADDER))
 			continue;
 
-		m_paths[i].flags |= WAYPOINT_CROUCH;
 		m_paths[i].flags &= ~WAYPOINT_JUMP;
 
 		for (slot = 0; slot < Const_MaxPathIndex; slot++)
@@ -2843,7 +2882,7 @@ static void AutoTagPoint(Waypoint* waypoint, const int16_t index)
 		path.flags |= WAYPOINT_USEBUTTON;
 
 	if (HasManualNearEntity(path.origin, "func_ladder", 40.0f))
-		path.flags |= WAYPOINT_LADDER | WAYPOINT_CROUCH;
+		path.flags |= WAYPOINT_LADDER;
 
 	if (HasManualLowCeiling(path.origin))
 		path.flags |= WAYPOINT_CROUCH;
@@ -3051,7 +3090,7 @@ void Waypoint::RunManualPreprocess(void)
 			path.flags |= WAYPOINT_USEBUTTON;
 
 		if (HasManualNearEntity(path.origin, "func_ladder", 35.0f))
-			path.flags |= WAYPOINT_LADDER | WAYPOINT_CROUCH;
+			path.flags |= WAYPOINT_LADDER;
 
 		if (HasManualLowCeiling(path.origin) || IsManualPointInArray(g_manualCrouchPoints, i))
 			path.flags |= WAYPOINT_CROUCH;

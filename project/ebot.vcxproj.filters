@@ -42,6 +42,7 @@
 	<ClCompile Include="..\source\ssm\usebutton.cpp">
 	  <Filter>SSM</Filter>
 	</ClCompile>
+	<ClCompile Include="..\source\algorithm_ai.cpp" />
 	<ClCompile Include="..\source\combat.cpp" />
 	<ClCompile Include="..\source\bot_query_hook.cpp" />
 	<ClCompile Include="..\source\bot_query_hook_win32.cpp" />
@@ -62,6 +63,7 @@
 	<ClInclude Include="..\include\sse_mathfun_extension.h" />
 	<ClInclude Include="..\include\compress.h" />
 	<ClInclude Include="..\include\async_pathfinder.h" />
+	<ClInclude Include="..\include\algorithm_ai.h" />
   </ItemGroup>
   <ItemGroup>
 	<ResourceCompile Include="..\include\ebot.rc" />
