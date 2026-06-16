@@ -21,7 +21,7 @@ THREADS = int(os.environ.get("ALGORITHM_AI_THREADS", "1"))
 CTX = int(os.environ.get("ALGORITHM_AI_CTX", "512"))
 MAX_TOKENS = int(os.environ.get("ALGORITHM_AI_MAX_TOKENS", "32"))
 TEMPERATURE = float(os.environ.get("ALGORITHM_AI_TEMPERATURE", "0.65"))
-TTS_ENABLED = os.environ.get("ALGORITHM_AI_TTS_ENABLED", "1") != "0"
+TTS_ENABLED = os.environ.get("ALGORITHM_AI_TTS_ENABLED", "0") == "1"
 TTS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
 TTS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
 TTS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
@@ -31,6 +31,7 @@ TTS_STABILITY = float(os.environ.get("ELEVENLABS_STABILITY", "0.6"))
 TTS_SIMILARITY = float(os.environ.get("ELEVENLABS_SIMILARITY", "0.8"))
 TTS_STYLE = float(os.environ.get("ELEVENLABS_STYLE", "0.86"))
 TTS_SPEAKER_BOOST = os.environ.get("ELEVENLABS_SPEAKER_BOOST", "1") != "0"
+TTS_TIMEOUT = float(os.environ.get("ELEVENLABS_TIMEOUT", "20"))
 TTS_CSTRIKE_ROOT = os.environ.get("ALGORITHM_AI_CSTRIKE_ROOT", "")
 TTS_SOUND_DIR = os.environ.get("ALGORITHM_AI_TTS_SOUND_DIR", "sound/ebot_tts")
 TTS_QUEUE_FILE = os.environ.get("ALGORITHM_AI_TTS_QUEUE_FILE", "")
@@ -123,7 +124,7 @@ def generate_tts_file(text):
             },
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=TTS_TIMEOUT) as response:
             pcm = response.read()
         write_pcm_wav(sound_abs, pcm)
         print(f"[algorithmAI] TTS saved {sound_abs}")
@@ -300,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
 
-        self.send_json({"ok": True, "model_loaded": llm is not None, "time": time.time()})
+        self.send_json({"ok": True, "model_loaded": llm is not None, "tts_enabled": TTS_ENABLED, "time": time.time()})
 
     def do_POST(self):
         if self.path != "/chat":
@@ -320,7 +321,10 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         reply = generate_reply(payload.get("player", "player"), payload.get("message", ""))
-        queue_tts(reply)
+        try:
+            queue_tts(reply)
+        except Exception as exc:
+            print(f"[algorithmAI] TTS queue failed: {exc}")
         self.send_json({"reply": reply})
 
     def send_json(self, payload):

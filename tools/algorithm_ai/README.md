@@ -85,20 +85,26 @@ If no model is loaded, the helper still returns fallback replies so the EBOT cha
 
 ## TTS
 
-TTS is enabled by default but only runs when both ElevenLabs secrets are present:
+TTS is disabled by default so ElevenLabs quota or voice errors cannot break LLM chat replies. Enable it explicitly only for voice tests:
+
+```text
+ALGORITHM_AI_TTS_ENABLED=1
+```
+
+It also requires both ElevenLabs secrets:
 
 ```text
 ELEVENLABS_API_KEY=...
 ELEVENLABS_VOICE_ID=...
 ```
 
-For systemd, put those secrets in:
+For systemd, put the toggle and secrets in:
 
 ```text
 /opt/zm43/hlds/cstrike/addons/ebot/algorithm_ai/algorithm_ai.env
 ```
 
-The committed service template loads that file with `EnvironmentFile=-.../algorithm_ai.env`. Do not commit real API keys.
+The committed service template loads that file with `EnvironmentFile=-.../algorithm_ai.env`. Do not commit real API keys. Set `ALGORITHM_AI_TTS_ENABLED=0` or remove the toggle to keep plain chat answers working without any ElevenLabs requests.
 
 The AMXX bridge requires ReAPI VTC / VoiceTranscoder or ReVoice support. It uses:
 
