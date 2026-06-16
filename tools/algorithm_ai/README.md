@@ -16,6 +16,14 @@ The helper returns:
 
 Then EBOT picks one alive bot and sends the answer through `FakeClientCommand(bot, "say ...")`.
 
+If TTS is configured, the same short reply is also sent to ElevenLabs, saved as a WAV file under:
+
+```text
+cstrike/sound/ebot_tts/
+```
+
+Then `addons/amxmodx/data/ebot_tts_queue.ini` is updated. The AMXX plugin `ebot_tts_vtc.amxx` reads that queue and plays the WAV through `VTC_PlaySound`, so it uses the GoldSrc voice stream instead of a local HL client microphone.
+
 ## Start on Windows
 
 ```powershell
@@ -74,3 +82,28 @@ tools/algorithm_ai/models/model.gguf
 ```
 
 If no model is loaded, the helper still returns fallback replies so the EBOT chat bridge can be tested immediately.
+
+## TTS
+
+TTS is enabled by default but only runs when both ElevenLabs secrets are present:
+
+```text
+ELEVENLABS_API_KEY=...
+ELEVENLABS_VOICE_ID=...
+```
+
+For systemd, put those secrets in:
+
+```text
+/opt/zm43/hlds/cstrike/addons/ebot/algorithm_ai/algorithm_ai.env
+```
+
+The committed service template loads that file with `EnvironmentFile=-.../algorithm_ai.env`. Do not commit real API keys.
+
+The AMXX bridge requires ReAPI VTC / VoiceTranscoder or ReVoice support. It uses:
+
+```pawn
+VTC_PlaySound(id, "sound/ebot_tts/file.wav");
+```
+
+This is intentionally not the old MikuTTS playback path with VB-Cable/PTT.

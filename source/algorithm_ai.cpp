@@ -563,6 +563,9 @@ void AlgorithmAI_StartHelper(void)
 	SetEnvironmentVariableA("ALGORITHM_AI_MAX_TOKENS", "32");
 	SetEnvironmentVariableA("ALGORITHM_AI_MODEL_URL", "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q3_k_m.gguf");
 	SetEnvironmentVariableA("ALGORITHM_AI_TEMPLATE", "qwen");
+	SetEnvironmentVariableA("ALGORITHM_AI_TTS_ENABLED", "1");
+	SetEnvironmentVariableA("ELEVENLABS_OUTPUT_FORMAT", "pcm_16000");
+	SetEnvironmentVariableA("ELEVENLABS_SAMPLE_RATE", "16000");
 
 	char command[1024];
 	snprintf(command, sizeof(command), "\"%s\" \"%s\"", python, scriptPath);

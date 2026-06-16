@@ -9,3 +9,4 @@ project/*.user
 *.tmp
 *.bak
 tools/algorithm_ai/models/*.gguf
+tools/algorithm_ai/*.env

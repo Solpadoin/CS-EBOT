@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import json
+import hashlib
 import os
 import subprocess
 import sys
+import threading
 import time
 import urllib.request
+import wave
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Lock
 
@@ -18,6 +21,19 @@ THREADS = int(os.environ.get("ALGORITHM_AI_THREADS", "1"))
 CTX = int(os.environ.get("ALGORITHM_AI_CTX", "512"))
 MAX_TOKENS = int(os.environ.get("ALGORITHM_AI_MAX_TOKENS", "32"))
 TEMPERATURE = float(os.environ.get("ALGORITHM_AI_TEMPERATURE", "0.65"))
+TTS_ENABLED = os.environ.get("ALGORITHM_AI_TTS_ENABLED", "1") != "0"
+TTS_API_KEY = os.environ.get("ELEVENLABS_API_KEY", "")
+TTS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID", "")
+TTS_MODEL = os.environ.get("ELEVENLABS_MODEL", "eleven_multilingual_v2")
+TTS_OUTPUT_FORMAT = os.environ.get("ELEVENLABS_OUTPUT_FORMAT", "pcm_16000")
+TTS_SAMPLE_RATE = int(os.environ.get("ELEVENLABS_SAMPLE_RATE", "16000"))
+TTS_STABILITY = float(os.environ.get("ELEVENLABS_STABILITY", "0.6"))
+TTS_SIMILARITY = float(os.environ.get("ELEVENLABS_SIMILARITY", "0.8"))
+TTS_STYLE = float(os.environ.get("ELEVENLABS_STYLE", "0.86"))
+TTS_SPEAKER_BOOST = os.environ.get("ELEVENLABS_SPEAKER_BOOST", "1") != "0"
+TTS_CSTRIKE_ROOT = os.environ.get("ALGORITHM_AI_CSTRIKE_ROOT", "")
+TTS_SOUND_DIR = os.environ.get("ALGORITHM_AI_TTS_SOUND_DIR", "sound/ebot_tts")
+TTS_QUEUE_FILE = os.environ.get("ALGORITHM_AI_TTS_QUEUE_FILE", "")
 
 SYSTEM_PROMPT = (
     "You are a normal human player on a Counter-Strike 1.6 zombie server. "
@@ -39,6 +55,100 @@ SERVER_KNOWLEDGE = (
 
 llm = None
 llm_lock = Lock()
+tts_lock = Lock()
+
+
+def resolve_cstrike_root():
+    if TTS_CSTRIKE_ROOT:
+        return TTS_CSTRIKE_ROOT
+
+    root = os.path.abspath(os.path.dirname(__file__))
+    for _ in range(6):
+        if os.path.basename(root).lower() == "cstrike":
+            return root
+        root = os.path.dirname(root)
+    return ""
+
+
+def tts_paths(text):
+    cstrike_root = resolve_cstrike_root()
+    if not cstrike_root:
+        return "", "", ""
+
+    sound_dir_rel = TTS_SOUND_DIR.replace("\\", "/").strip("/")
+    sound_dir_abs = os.path.join(cstrike_root, *sound_dir_rel.split("/"))
+    os.makedirs(sound_dir_abs, exist_ok=True)
+
+    digest = hashlib.sha1(text.encode("utf-8", errors="ignore")).hexdigest()[:16]
+    sound_rel = f"{sound_dir_rel}/{digest}.wav"
+    sound_abs = os.path.join(cstrike_root, *sound_rel.split("/"))
+    queue_file = TTS_QUEUE_FILE or os.path.join(cstrike_root, "addons", "amxmodx", "data", "ebot_tts_queue.ini")
+    os.makedirs(os.path.dirname(queue_file), exist_ok=True)
+    return sound_rel, sound_abs, queue_file
+
+
+def write_pcm_wav(path, pcm):
+    with wave.open(path, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(TTS_SAMPLE_RATE)
+        wav.writeframes(pcm)
+
+
+def generate_tts_file(text):
+    sound_rel, sound_abs, queue_file = tts_paths(text)
+    if not sound_rel:
+        print("[algorithmAI] TTS skipped: cstrike root is not configured")
+        return
+
+    if not os.path.exists(sound_abs):
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{TTS_VOICE_ID}"
+        body = json.dumps({
+            "text": text,
+            "model_id": TTS_MODEL,
+            "voice_settings": {
+                "stability": TTS_STABILITY,
+                "similarity_boost": TTS_SIMILARITY,
+                "style": TTS_STYLE,
+                "use_speaker_boost": TTS_SPEAKER_BOOST,
+            },
+        }).encode("utf-8")
+
+        request = urllib.request.Request(
+            f"{url}?output_format={TTS_OUTPUT_FORMAT}",
+            data=body,
+            headers={
+                "xi-api-key": TTS_API_KEY,
+                "Content-Type": "application/json",
+            },
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            pcm = response.read()
+        write_pcm_wav(sound_abs, pcm)
+        print(f"[algorithmAI] TTS saved {sound_abs}")
+
+    with tts_lock:
+        with open(queue_file, "a", encoding="utf-8", newline="\n") as queue:
+            queue.write(f"{sound_rel}\n")
+    print(f"[algorithmAI] TTS queued {sound_rel}")
+
+
+def queue_tts(text):
+    text = normalize_reply(text)
+    if not TTS_ENABLED or not text:
+        return
+    if not TTS_API_KEY or not TTS_VOICE_ID:
+        print("[algorithmAI] TTS skipped: ELEVENLABS_API_KEY or ELEVENLABS_VOICE_ID is missing")
+        return
+
+    def worker():
+        try:
+            generate_tts_file(text)
+        except Exception as exc:
+            print(f"[algorithmAI] TTS failed: {exc}")
+
+    threading.Thread(target=worker, daemon=True).start()
 
 
 def ensure_model():
@@ -210,6 +320,7 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         reply = generate_reply(payload.get("player", "player"), payload.get("message", ""))
+        queue_tts(reply)
         self.send_json({"reply": reply})
 
     def send_json(self, payload):

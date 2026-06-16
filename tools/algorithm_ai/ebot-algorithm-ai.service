@@ -4,7 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/zm43/hlds/cstrike/addons/ebot/algorithm_ai
+WorkingDirectory=/root/zm43/server/cstrike/addons/ebot/algorithm_ai
 Environment=ALGORITHM_AI_HOST=127.0.0.1
 Environment=ALGORITHM_AI_PORT=7867
 Environment=ALGORITHM_AI_THREADS=2
@@ -12,7 +12,11 @@ Environment=ALGORITHM_AI_CTX=512
 Environment=ALGORITHM_AI_MAX_TOKENS=32
 Environment=ALGORITHM_AI_TEMPLATE=qwen
 Environment=ALGORITHM_AI_MODEL_URL=https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q3_k_m.gguf
-ExecStart=/usr/bin/python3 /opt/zm43/hlds/cstrike/addons/ebot/algorithm_ai/algorithm_ai_server.py
+Environment=ALGORITHM_AI_TTS_ENABLED=1
+Environment=ELEVENLABS_OUTPUT_FORMAT=pcm_16000
+Environment=ELEVENLABS_SAMPLE_RATE=16000
+EnvironmentFile=-/root/zm43/server/cstrike/addons/ebot/algorithm_ai/algorithm_ai.env
+ExecStart=/root/zm43/ai-venv/bin/python /root/zm43/server/cstrike/addons/ebot/algorithm_ai/algorithm_ai_server.py
 Restart=on-failure
 RestartSec=3
 CPUQuota=30%
