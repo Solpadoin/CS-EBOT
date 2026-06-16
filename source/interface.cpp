@@ -2342,6 +2342,7 @@ void ServerActivate(edict_t* pentEdictList, int edictCount, int clientMax)
 
 	g_botManager->InitQuota();
 	g_asyncPathfinder.Start();
+	AlgorithmAI_ResetMapState();
 
 	secondTimer = 0.0f;
 	g_fakeCommandTimer = 0.0f;
@@ -2366,6 +2367,7 @@ void ServerDeactivate(void)
 	// signal matrix calculation thread to stop
 	g_isMatrixCalculating = false;
 	g_asyncPathfinder.Stop();
+	AlgorithmAI_ResetMapState();
 
 	secondTimer = 0.0f;
 	g_fakeCommandTimer = 0.0f;

@@ -5,5 +5,6 @@ extern void AlgorithmAI_OnPlayerChat(edict_t* player, const char* text);
 extern void AlgorithmAI_Think(void);
 extern void AlgorithmAI_StartHelper(void);
 extern void AlgorithmAI_StopHelper(void);
+extern void AlgorithmAI_ResetMapState(void);
 
 #endif // EBOT_ALGORITHM_AI_INCLUDED

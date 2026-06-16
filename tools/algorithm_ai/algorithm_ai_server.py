@@ -6,6 +6,7 @@ import sys
 import time
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from threading import Lock
 
 
 HOST = os.environ.get("ALGORITHM_AI_HOST", "127.0.0.1")
@@ -15,7 +16,7 @@ MODEL_URL = os.environ.get("ALGORITHM_AI_MODEL_URL", "")
 TEMPLATE = os.environ.get("ALGORITHM_AI_TEMPLATE", "auto").lower()
 THREADS = int(os.environ.get("ALGORITHM_AI_THREADS", "1"))
 CTX = int(os.environ.get("ALGORITHM_AI_CTX", "512"))
-MAX_TOKENS = int(os.environ.get("ALGORITHM_AI_MAX_TOKENS", "64"))
+MAX_TOKENS = int(os.environ.get("ALGORITHM_AI_MAX_TOKENS", "32"))
 TEMPERATURE = float(os.environ.get("ALGORITHM_AI_TEMPERATURE", "0.65"))
 
 SYSTEM_PROMPT = (
@@ -24,11 +25,20 @@ SYSTEM_PROMPT = (
     "Act like a casual player: friendly, brief, imperfect, and natural. "
     "If asked who you are, answer like a human player with a nickname. "
     "If asked what you feel, answer with simple human-like emotions. "
-    "Use the same language as the player. If the player writes in Russian, reply only in Russian. "
-    "Keep answers under 180 characters."
+    "Use the same language as the player. If the player writes in Russian, reply only in Russian, not Bulgarian or Ukrainian. "
+    "Answer in one short sentence, 10 to 18 words maximum."
+)
+
+SERVER_KNOWLEDGE = (
+    "Server knowledge you know as a regular player:\n"
+    "- To plant a lasermine: buy it with /lm, aim at a wall, then use the player's bind, usually bind p +setlaser.\n"
+    "- If asked about laser mines in Russian, say: use /lm, aim at the wall, press bind p +setlaser.\n"
+    "- To place a turret: buy the turret from extra items, then place it from its item/menu flow.\n"
+    "- If asked about turrets in Russian, say: buy it in extra items and then place it from the menu.\n"
 )
 
 llm = None
+llm_lock = Lock()
 
 
 def ensure_model():
@@ -78,12 +88,48 @@ def init_model():
 def fallback_reply(player, message):
     msg = (message or "").strip()
     if "?" in msg:
-        return f"{player}, AI is warming up. I can read you, model is not loaded yet."
-    return "I heard you. Model is not loaded yet, but the chat bridge works."
+        return f"{player}, \u0441\u0435\u043a\u0443\u043d\u0434\u0443, \u044f \u0447\u0443\u0442\u044c \u0437\u0430\u0432\u0438\u0441."
+    return "\u0412\u0438\u0436\u0443 \u0447\u0430\u0442, \u0441\u0435\u0439\u0447\u0430\u0441 \u043e\u0442\u0432\u0435\u0447\u0443."
 
 
 def has_cyrillic(text):
     return any("\u0400" <= ch <= "\u04ff" for ch in text or "")
+
+
+def normalize_reply(text):
+    text = " ".join((text or "").replace("\r", " ").replace("\n", " ").split())
+    if not text:
+        return ""
+
+    sentence_end = min([idx for idx in (text.find("."), text.find("!"), text.find("?")) if idx >= 0] or [-1])
+    if sentence_end >= 0:
+        text = text[: sentence_end + 1]
+
+    words = text.split()
+    if len(words) > 15:
+        text = " ".join(words[:15]).rstrip(" ,;:")
+
+    if len(text.encode("utf-8", errors="ignore")) > 150:
+        out = []
+        size = 0
+        for word in text.split():
+            word_size = len(word.encode("utf-8", errors="ignore")) + (1 if out else 0)
+            if size + word_size > 150:
+                break
+            out.append(word)
+            size += word_size
+        text = " ".join(out)
+
+    return text.strip().strip('"')
+
+
+def russian_fallback(message):
+    msg = (message or "").lower()
+    if "\u043a\u0442\u043e" in msg:
+        return "\u042f \u043e\u0431\u044b\u0447\u043d\u044b\u0439 \u0438\u0433\u0440\u043e\u043a, \u043f\u0440\u043e\u0441\u0442\u043e \u0431\u0435\u0433\u0430\u044e \u0442\u0443\u0442 \u0441 \u0432\u0430\u043c\u0438."
+    if "\u0447\u0443\u0432" in msg:
+        return "\u0414\u0430 \u043d\u043e\u0440\u043c\u0430\u043b\u044c\u043d\u043e, \u043d\u0435\u043c\u043d\u043e\u0433\u043e \u043d\u0430\u043f\u0440\u044f\u0436\u043d\u043e, \u0437\u043e\u043c\u0431\u0438 \u0440\u044f\u0434\u043e\u043c."
+    return "\u0414\u0430 \u044f \u0442\u0443\u0442, \u0438\u0433\u0440\u0430\u044e \u043f\u043e\u0442\u0438\u0445\u043e\u043d\u044c\u043a\u0443."
 
 
 def generate_reply(player, message):
@@ -102,6 +148,7 @@ def generate_reply(player, message):
         language_rule = "The player wrote in Russian. Reply only in Russian.\n" if has_cyrillic(message) else ""
         prompt = (
             f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
+            f"<|im_start|>system\n{SERVER_KNOWLEDGE}<|im_end|>\n"
             f"<|im_start|>user\n{language_rule}{player}: {message}<|im_end|>\n"
             f"<|im_start|>assistant\n"
         )
@@ -109,20 +156,30 @@ def generate_reply(player, message):
     else:
         language_rule = "The player wrote in Russian. Reply only in Russian.\n" if has_cyrillic(message) else ""
         prompt = (
-            f"<|system|>\n{SYSTEM_PROMPT}</s>\n"
+            f"<|system|>\n{SYSTEM_PROMPT}\n{SERVER_KNOWLEDGE}</s>\n"
             f"<|user|>\n{language_rule}{player}: {message}</s>\n"
             f"<|assistant|>\n"
         )
         stop = ["</s>", "<|user|>", "<|system|>", "\n\n"]
 
-    result = llm(
-        prompt,
-        max_tokens=MAX_TOKENS,
-        temperature=TEMPERATURE,
-        stop=stop,
-    )
-    text = result["choices"][0]["text"].strip()
-    return " ".join(text.split())[:180] or fallback_reply(player, message)
+    try:
+        llm_lock.acquire()
+        result = llm(
+            prompt,
+            max_tokens=MAX_TOKENS,
+            temperature=TEMPERATURE,
+            stop=stop,
+        )
+    except Exception as exc:
+        print(f"[algorithmAI] generation failed: {exc}")
+        return fallback_reply(player, message)
+    finally:
+        llm_lock.release()
+
+    text = normalize_reply(result["choices"][0]["text"])
+    if has_cyrillic(message) and not has_cyrillic(text):
+        text = russian_fallback(message)
+    return text or fallback_reply(player, message)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -143,7 +200,11 @@ class Handler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(min(length, 4096))
         try:
-            payload = json.loads(raw.decode("utf-8", errors="replace"))
+            try:
+                decoded = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                decoded = raw.decode("cp1251", errors="replace")
+            payload = json.loads(decoded)
         except Exception:
             self.send_error(400)
             return
@@ -157,7 +218,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
-        self.wfile.write(data)
+        try:
+            self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            print("[algorithmAI] client disconnected before reply was sent")
 
     def log_message(self, fmt, *args):
         print(f"[algorithmAI] {self.address_string()} {fmt % args}")

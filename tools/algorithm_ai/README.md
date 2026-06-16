@@ -46,16 +46,16 @@ $env:ALGORITHM_AI_MODEL_PATH="C:\path\to\small-model.gguf"
 Optional auto-download:
 
 ```powershell
-$env:ALGORITHM_AI_MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q3_k_m.gguf"
+$env:ALGORITHM_AI_MODEL_URL="https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q3_k_m.gguf"
 ```
 
 Current local test model:
 
 ```text
-Qwen2.5-1.5B-Instruct-GGUF / qwen2.5-1.5b-instruct-q3_k_m.gguf
+Qwen2.5-3B-Instruct-GGUF / qwen2.5-3b-instruct-q3_k_m.gguf
 ```
 
-For the current server budget, keep it tiny: roughly 1.5B parameters in Q3 quantization, `ALGORITHM_AI_THREADS=2`, `ALGORITHM_AI_CTX=512`, and `ALGORITHM_AI_MAX_TOKENS=40`.
+For the current server budget, use the 3B Q3_K_M model with `ALGORITHM_AI_THREADS=2`, `ALGORITHM_AI_CTX=512`, and `ALGORITHM_AI_MAX_TOKENS=32`. The chat bridge trims replies to one short in-game sentence, so longer model output does not overflow the CS 1.6 chat line.
 
 On Linux, enforce the CPU budget with systemd. A ready template is included as:
 
@@ -63,8 +63,14 @@ On Linux, enforce the CPU budget with systemd. A ready template is included as:
 tools/algorithm_ai/ebot-algorithm-ai.service
 ```
 
-It uses `CPUQuota=30%` and `MemoryMax=1400M`; adjust `WorkingDirectory` and `ExecStart` to the real server path before installing it.
+It uses `CPUQuota=30%` and `MemoryMax=1900M`; adjust `WorkingDirectory` and `ExecStart` to the real server path before installing it.
 
 When EBOT loads, the DLL can autostart this helper from `addons/ebot/algorithm_ai`. If `ALGORITHM_AI_MODEL_URL` is set and `models/model.gguf` is missing, the helper downloads the model. If `llama-cpp-python` is missing, it tries to install it once via pip and falls back gracefully if that fails.
+
+GGUF files are intentionally ignored by Git because they are large. The active local model path is:
+
+```text
+tools/algorithm_ai/models/model.gguf
+```
 
 If no model is loaded, the helper still returns fallback replies so the EBOT chat bridge can be tested immediately.

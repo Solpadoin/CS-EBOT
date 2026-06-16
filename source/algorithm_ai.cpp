@@ -3,10 +3,19 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #pragma comment(lib, "ws2_32.lib")
+#else
+#include <arpa/inet.h>
+#include <errno.h>
+#include <netdb.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
 #endif
 
 #include <string>
 #include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
 
 #include "core.h"
 
@@ -17,8 +26,9 @@ ConVar ebot_ai_chat_python("ebot_ai_chat_python", "python");
 ConVar ebot_ai_chat_host("ebot_ai_chat_host", "127.0.0.1");
 ConVar ebot_ai_chat_port("ebot_ai_chat_port", "7867");
 ConVar ebot_ai_chat_path("ebot_ai_chat_path", "/chat");
-ConVar ebot_ai_chat_timeout_ms("ebot_ai_chat_timeout_ms", "700");
+ConVar ebot_ai_chat_timeout_ms("ebot_ai_chat_timeout_ms", "30000");
 ConVar ebot_ai_chat_cooldown("ebot_ai_chat_cooldown", "4.0");
+ConVar ebot_ai_chat_debug("ebot_ai_chat_debug", "1");
 
 namespace
 {
@@ -43,6 +53,72 @@ namespace
 	PROCESS_INFORMATION g_helperProcess{};
 	bool g_helperOwned{false};
 #endif
+
+	static void DebugLog(const char* format, ...)
+	{
+		if (!ebot_ai_chat_debug.GetBool())
+			return;
+
+		char message[256];
+		va_list ap;
+		va_start(ap, format);
+		vsnprintf(message, sizeof(message), format, ap);
+		va_end(ap);
+
+		ServerPrint("[algorithmAI] %s", message);
+	}
+
+	static void TrimChatReply(char* text, const int maxBytes, const int maxWords)
+	{
+		if (!text || maxBytes <= 1)
+			return;
+
+		int out = 0;
+		int words = 0;
+		bool inWord = false;
+		bool stop = false;
+
+		for (int i = 0; text[i] && out < maxBytes - 1 && !stop; i++)
+		{
+			char ch = text[i];
+			if (ch == '\r' || ch == '\n' || ch == '\t')
+				ch = ' ';
+
+			if (ch == '.' || ch == '!' || ch == '?')
+			{
+				text[out++] = ch;
+				break;
+			}
+
+			if (ch == ' ')
+			{
+				if (out == 0 || text[out - 1] == ' ')
+					continue;
+
+				inWord = false;
+				text[out++] = ch;
+				continue;
+			}
+
+			if (!inWord)
+			{
+				if (++words > maxWords)
+				{
+					stop = true;
+					break;
+				}
+
+				inWord = true;
+			}
+
+			text[out++] = ch;
+		}
+
+		while (out > 0 && text[out - 1] == ' ')
+			out--;
+
+		text[out] = '\0';
+	}
 
 	static void CopyClean(char* dst, const int dstSize, const char* src, const bool chatSafe)
 	{
@@ -79,6 +155,9 @@ namespace
 		out = cstrlen(dst);
 		if (out > 0 && dst[out - 1] == '"')
 			dst[out - 1] = '\0';
+
+		if (chatSafe)
+			TrimChatReply(dst, 144, 15);
 	}
 
 	static bool LooksLikePrompt(const char* text)
@@ -179,20 +258,16 @@ namespace
 
 	static bool HttpPost(const AIRequest* request, char* output, const int outputSize)
 	{
-#ifndef _WIN32
-		(void)request;
-		(void)output;
-		(void)outputSize;
-		return false;
-#else
+#ifdef _WIN32
 		WSADATA wsaData;
 		if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0)
 			return false;
+#endif
 
 		const char* host = ebot_ai_chat_host.GetString();
 		const char* path = ebot_ai_chat_path.GetString();
 		const int port = ebot_ai_chat_port.GetInt() > 0 ? ebot_ai_chat_port.GetInt() : 7867;
-		const int timeout = ebot_ai_chat_timeout_ms.GetInt() > 0 ? ebot_ai_chat_timeout_ms.GetInt() : 700;
+		const int timeout = ebot_ai_chat_timeout_ms.GetInt() > 0 ? ebot_ai_chat_timeout_ms.GetInt() : 30000;
 		if (IsNullString(host))
 			host = "127.0.0.1";
 		if (IsNullString(path))
@@ -207,26 +282,53 @@ namespace
 
 		if (getaddrinfo(host, portText, &hints, &result) != 0 || !result)
 		{
+#ifdef _WIN32
 			WSACleanup();
+#endif
 			return false;
 		}
 
+#ifdef _WIN32
 		SOCKET sock = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
 		if (sock == INVALID_SOCKET)
+#else
+		int sock = socket(result->ai_family, result->ai_socktype, result->ai_protocol);
+		if (sock < 0)
+#endif
 		{
 			freeaddrinfo(result);
+#ifdef _WIN32
 			WSACleanup();
+#endif
 			return false;
 		}
 
+#ifdef _WIN32
 		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
 		setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, reinterpret_cast<const char*>(&timeout), sizeof(timeout));
+#else
+		timeval tv{};
+		tv.tv_sec = timeout / 1000;
+		tv.tv_usec = (timeout % 1000) * 1000;
+		setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+		setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
+#endif
 
+#ifdef _WIN32
 		if (connect(sock, result->ai_addr, static_cast<int>(result->ai_addrlen)) == SOCKET_ERROR)
+#else
+		if (connect(sock, result->ai_addr, result->ai_addrlen) != 0)
+#endif
 		{
+#ifdef _WIN32
 			closesocket(sock);
+#else
+			close(sock);
+#endif
 			freeaddrinfo(result);
+#ifdef _WIN32
 			WSACleanup();
+#endif
 			return false;
 		}
 		freeaddrinfo(result);
@@ -235,10 +337,18 @@ namespace
 		const std::string http = std::string("POST ") + path + " HTTP/1.1\r\nHost: " + host + ":" + portText +
 			"\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: " + std::to_string(body.length()) + "\r\n\r\n" + body;
 
+#ifdef _WIN32
 		if (send(sock, http.c_str(), static_cast<int>(http.length()), 0) == SOCKET_ERROR)
+#else
+		if (send(sock, http.c_str(), http.length(), 0) < 0)
+#endif
 		{
+#ifdef _WIN32
 			closesocket(sock);
 			WSACleanup();
+#else
+			close(sock);
+#endif
 			return false;
 		}
 
@@ -256,13 +366,16 @@ namespace
 				break;
 		}
 
+#ifdef _WIN32
 		closesocket(sock);
 		WSACleanup();
+#else
+		close(sock);
+#endif
 
 		const size_t bodyStart = response.find("\r\n\r\n");
 		const std::string json = bodyStart == std::string::npos ? response : response.substr(bodyStart + 4);
 		return ExtractReply(json, output, outputSize);
-#endif
 	}
 
 #ifdef _WIN32
@@ -385,13 +498,22 @@ namespace
 		AIRequest* request = static_cast<AIRequest*>(data);
 		char reply[192]{};
 
-		if (!HttpPost(request, reply, sizeof(reply)))
-			CopyClean(reply, sizeof(reply), "AI helper is not ready yet.", true);
+		const bool ok = HttpPost(request, reply, sizeof(reply));
+		DebugLog("HTTP %s for %s%s%s", ok ? "ok" : "failed", request->player, ok && !IsNullString(reply) ? ": " : "", ok && !IsNullString(reply) ? reply : "");
 
 		{
 			tthread::lock_guard<tthread::mutex> guard(g_aiState.lock);
-			CopyClean(g_aiState.response, sizeof(g_aiState.response), reply, true);
-			g_aiState.hasResponse = !IsNullString(g_aiState.response);
+			if (ok && !IsNullString(reply))
+			{
+				CopyClean(g_aiState.response, sizeof(g_aiState.response), reply, true);
+				g_aiState.hasResponse = !IsNullString(g_aiState.response);
+			}
+			else
+			{
+				g_aiState.response[0] = '\0';
+				g_aiState.hasResponse = false;
+			}
+
 			g_aiState.busy = false;
 		}
 
@@ -438,8 +560,8 @@ void AlgorithmAI_StartHelper(void)
 
 	SetEnvironmentVariableA("ALGORITHM_AI_THREADS", "2");
 	SetEnvironmentVariableA("ALGORITHM_AI_CTX", "512");
-	SetEnvironmentVariableA("ALGORITHM_AI_MAX_TOKENS", "40");
-	SetEnvironmentVariableA("ALGORITHM_AI_MODEL_URL", "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q3_k_m.gguf");
+	SetEnvironmentVariableA("ALGORITHM_AI_MAX_TOKENS", "32");
+	SetEnvironmentVariableA("ALGORITHM_AI_MODEL_URL", "https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q3_k_m.gguf");
 	SetEnvironmentVariableA("ALGORITHM_AI_TEMPLATE", "qwen");
 
 	char command[1024];
@@ -485,6 +607,16 @@ void AlgorithmAI_StopHelper(void)
 #endif
 }
 
+void AlgorithmAI_ResetMapState(void)
+{
+	tthread::lock_guard<tthread::mutex> guard(g_aiState.lock);
+	g_aiState.busy = false;
+	g_aiState.hasResponse = false;
+	g_aiState.nextPromptTime = 0.0f;
+	g_aiState.response[0] = '\0';
+	DebugLog("state reset");
+}
+
 void AlgorithmAI_OnPlayerChat(edict_t* player, const char* text)
 {
 	if (!ebot_ai_chat.GetBool() || FNullEnt(player) || IsValidBot(player))
@@ -496,12 +628,16 @@ void AlgorithmAI_OnPlayerChat(edict_t* player, const char* text)
 		return;
 
 	AlgorithmAI_StartHelper();
+	DebugLog("prompt from %s: %s", GetEntityName(player), SkipChatPrefix(cleanText));
 
 	const float now = engine->GetTime();
 	{
 		tthread::lock_guard<tthread::mutex> guard(g_aiState.lock);
 		if (g_aiState.busy || g_aiState.nextPromptTime > now)
+		{
+			DebugLog("prompt skipped: %s", g_aiState.busy ? "busy" : "cooldown");
 			return;
+		}
 
 		g_aiState.busy = true;
 		g_aiState.nextPromptTime = now + cmax(1.0f, ebot_ai_chat_cooldown.GetFloat());
@@ -543,11 +679,21 @@ void AlgorithmAI_Think(void)
 			return;
 
 		CopyClean(reply, sizeof(reply), g_aiState.response, true);
+	}
+
+	edict_t* speaker = PickSpeakerBot();
+	if (!speaker || IsNullString(reply))
+		return;
+
+	{
+		tthread::lock_guard<tthread::mutex> guard(g_aiState.lock);
 		g_aiState.response[0] = '\0';
 		g_aiState.hasResponse = false;
 	}
 
-	edict_t* speaker = PickSpeakerBot();
 	if (speaker && !IsNullString(reply))
+	{
+		DebugLog("say via %s: %s", GetEntityName(speaker), reply);
 		FakeClientCommand(speaker, "say \"%s\"", reply);
+	}
 }

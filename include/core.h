@@ -1299,6 +1299,7 @@ extern void AlgorithmAI_OnPlayerChat(edict_t *player, const char *text);
 extern void AlgorithmAI_Think(void);
 extern void AlgorithmAI_StartHelper(void);
 extern void AlgorithmAI_StopHelper(void);
+extern void AlgorithmAI_ResetMapState(void);
 extern void CreateWaypointPath(char *path);
 extern void ServerCommand(const char *format, ...);
 extern void RegisterCommand(const char *command, void funcPtr(void));

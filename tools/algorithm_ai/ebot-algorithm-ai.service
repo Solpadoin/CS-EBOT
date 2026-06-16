@@ -9,14 +9,14 @@ Environment=ALGORITHM_AI_HOST=127.0.0.1
 Environment=ALGORITHM_AI_PORT=7867
 Environment=ALGORITHM_AI_THREADS=2
 Environment=ALGORITHM_AI_CTX=512
-Environment=ALGORITHM_AI_MAX_TOKENS=40
+Environment=ALGORITHM_AI_MAX_TOKENS=32
 Environment=ALGORITHM_AI_TEMPLATE=qwen
-Environment=ALGORITHM_AI_MODEL_URL=https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q3_k_m.gguf
+Environment=ALGORITHM_AI_MODEL_URL=https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF/resolve/main/qwen2.5-3b-instruct-q3_k_m.gguf
 ExecStart=/usr/bin/python3 /opt/zm43/hlds/cstrike/addons/ebot/algorithm_ai/algorithm_ai_server.py
 Restart=on-failure
 RestartSec=3
 CPUQuota=30%
-MemoryMax=1400M
+MemoryMax=1900M
 
 [Install]
 WantedBy=multi-user.target
